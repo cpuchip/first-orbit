@@ -22,6 +22,7 @@ import { propagate, type Elements } from '../shared/orbit.ts'
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len } from '../shared/units.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
 import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
+import type { MilestoneKind } from '../shared/milestones.ts'
 
 export type FlightPhase = 'prelaunch' | 'ascent' | 'coast' | 'circularize'
 
@@ -62,7 +63,10 @@ export class Game {
   private apPhase: FlightPhase = 'ascent'
   private settled = false
   private netAccum = 0
+  private milestoneFired = new Set<MilestoneKind>()
+  private wasInSpace = false
   send: (m: ClientMsg) => void = () => {}
+  onMilestone: (kind: MilestoneKind) => void = () => {}
 
   launch(vehicle: Vehicle, vesselId: string): void {
     this.stages = flightStages(vehicle)
@@ -73,6 +77,8 @@ export class Game {
     this.warp = 1
     this.apPhase = 'ascent'
     this.settled = false
+    this.milestoneFired.clear()
+    this.wasInSpace = false
   }
 
   stageNow(): void {
@@ -162,6 +168,22 @@ export class Game {
     const body = SYSTEM[bodyId]
     const bodyAtmo = body.atmosphere?.height ?? 0
     const stableOrbit = this.throttle === 0 && el.e < 1 && periapsis > body.radius + bodyAtmo
+
+    // --- milestone detection (fire each once) -------------------------------
+    if (alt > ATMO) this.wasInSpace = true
+    const fire = (k: MilestoneKind) => {
+      if (!this.milestoneFired.has(k)) {
+        this.milestoneFired.add(k)
+        this.onMilestone(k)
+      }
+    }
+    const bound = el.e < 1 && periapsis > body.radius + bodyAtmo
+    if (!this.st.landed && this.st.t > 2 && alt > 500) fire('launch')
+    if (bound && bodyId === 'terra') fire('orbit')
+    if (bodyId === 'luna') fire('luna_soi')
+    if (bound && bodyId === 'luna') fire('luna_orbit')
+    if (this.st.landed && bodyId === 'luna') fire('luna_landing')
+    if (this.st.landed && bodyId === 'terra' && this.wasInSpace && this.st.t > 5) fire('return')
     const settledStatus = this.st.landed ? 'landed' : stableOrbit ? 'orbit' : null
     if (settledStatus && !this.settled) {
       this.send({ type: 'settle', vesselId: this.vesselId, orbit: el, status: settledStatus, bodyId })

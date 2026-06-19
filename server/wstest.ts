@@ -12,6 +12,7 @@ import { WebSocket } from 'ws'
 import { encode, decode, PROTOCOL_VERSION, type ClientMsg, type ServerMsg } from '../shared/netproto.ts'
 import { stateToElements, circularSpeed } from '../shared/orbit.ts'
 import { SYSTEM, ROOT } from '../shared/bodies.ts'
+import { MILESTONES } from '../shared/milestones.ts'
 
 const PORT = 8099
 process.env.PORT = String(PORT)
@@ -88,7 +89,26 @@ async function main() {
   const chat = await nextOfType(b, 'chat')
   check('chat broadcast', chat.from === 'Ada' && chat.text.includes('liftoff'), `text=${chat.text}`)
 
-  a.close(); b.close()
+  // Milestone: first award broadcasts an achievement with the funds reward.
+  send(a, { type: 'milestone', vesselId: vid, kind: 'orbit' })
+  const ach = await nextOfType(b, 'achievement')
+  check('milestone -> achievement broadcast', ach.kind === 'orbit' && ach.first && ach.funds === MILESTONES.orbit.funds, `funds=${ach.funds} first=${ach.first}`)
+
+  // Idempotent: a second award is a no-op. Verify via a fresh client's welcome
+  // (avoids the achievement/players back-to-back delivery race).
+  send(a, { type: 'milestone', vesselId: vid, kind: 'orbit' })
+  await wait(150)
+  const c = await connect()
+  send(c, { type: 'hello', name: 'Cyril', protocol: PROTOCOL_VERSION })
+  const wc = await nextOfType(c, 'welcome')
+  const ada = wc.players.find((p) => p.name === 'Ada')!
+  check(
+    'milestone awarded once (idempotent) + funds credited',
+    ada.funds === welcome.you.funds + MILESTONES.orbit.funds && ada.achieved.filter((k) => k === 'orbit').length === 1,
+    `funds=${ada.funds} achieved=${ada.achieved.join(',')}`,
+  )
+
+  a.close(); b.close(); c.close()
   console.log(`\n${passed} passed, ${failures.length} failed`)
   if (failures.length) { for (const f of failures) console.log(`  - ${f}`); process.exit(1) }
   console.log('wstest green ✓')

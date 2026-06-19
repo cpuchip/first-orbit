@@ -136,6 +136,17 @@ wss.on('connection', (ws) => {
       case 'recover': {
         if (!client.playerId) return
         program.recover(msg.vesselId, client.playerId)
+        broadcast({ type: 'players', players: program.roster() })
+        break
+      }
+      case 'milestone': {
+        const me = client.playerId && program.player(client.playerId)
+        if (!me) return
+        const res = program.awardMilestone(me.id, msg.kind)
+        if (res?.newly) {
+          broadcast({ type: 'achievement', playerName: me.name, color: me.color, kind: msg.kind, funds: res.funds, science: res.science, first: res.first, ts: Date.now() })
+          broadcast({ type: 'players', players: program.roster() })
+        }
         break
       }
       case 'chat': {

@@ -7,6 +7,7 @@
 // cheaply — it only relays the short bursts of active, powered flight.
 
 import type { Elements } from './orbit.ts'
+import type { MilestoneKind } from './milestones.ts'
 
 export const SNAPSHOT_HZ = 10 // server -> client universe snapshots per second
 export const FLIGHT_HZ = 20 // client -> server active-flight updates per second
@@ -32,6 +33,7 @@ export interface PlayerInfo {
   color: string
   funds: number
   science: number
+  achieved: MilestoneKind[]
 }
 
 // ---- client -> server ----------------------------------------------------------
@@ -41,6 +43,7 @@ export type ClientMsg =
   | { type: 'flight'; vesselId: string; x: number; y: number; vx: number; vy: number; heading: number; t: number }
   | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string }
   | { type: 'recover'; vesselId: string }
+  | { type: 'milestone'; vesselId: string; kind: MilestoneKind }
   | { type: 'chat'; text: string }
   | { type: 'ping' }
 
@@ -50,6 +53,7 @@ export type ServerMsg =
   | { type: 'players'; players: PlayerInfo[] }
   | { type: 'snapshot'; universeTime: number; vessels: VesselState[] }
   | { type: 'vesselCreated'; vessel: VesselState }
+  | { type: 'achievement'; playerName: string; color: string; kind: MilestoneKind; funds: number; science: number; first: boolean; ts: number }
   | { type: 'chat'; from: string; color: string; text: string; ts: number }
   | { type: 'error'; message: string }
   | { type: 'pong' }

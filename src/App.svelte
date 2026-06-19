@@ -6,6 +6,7 @@
   import { referenceRocket, performance as stagePerformance, totalDeltaV, totalMass } from '../shared/vehicle.ts'
   import { SYSTEM, ROOT, surfaceGravity } from '../shared/bodies.ts'
   import type { PlayerInfo, VesselState, ServerMsg } from '../shared/netproto.ts'
+  import { MILESTONES } from '../shared/milestones.ts'
 
   const BUILD = __BUILD_SHA__
   const terra = SYSTEM[ROOT]
@@ -21,6 +22,9 @@
   let chatInput = $state('')
   let mapZoom = $state(1)
   let hud = $state<ReturnType<Game['readout']> | null>(null)
+  let you = $state<PlayerInfo | null>(null)
+  let toasts = $state<{ id: number; text: string; color: string; first: boolean }[]>([])
+  let toastSeq = 0
 
   // Universe clock, anchored to the last server time we heard.
   let serverTime = 0
@@ -31,6 +35,9 @@
   const net = new Net()
   const game = new Game()
   game.send = (m) => net.send(m)
+  game.onMilestone = (kind) => {
+    if (game.vesselId) net.send({ type: 'milestone', vesselId: game.vesselId, kind })
+  }
 
   let canvas: HTMLCanvasElement
   let ctx: CanvasRenderingContext2D
@@ -48,12 +55,24 @@
         connected = true
         players = msg.players
         vessels = msg.vessels
+        you = msg.you
         serverTime = msg.universeTime
         serverStamp = performanceNow()
         break
       case 'players':
         players = msg.players
+        you = msg.players.find((p) => p.id === you?.id) ?? you
         break
+      case 'achievement': {
+        const def = MILESTONES[msg.kind]
+        const id = ++toastSeq
+        const text = msg.first
+          ? `★ ${msg.playerName} was FIRST to ${def.blurb}!`
+          : `${msg.playerName} ${def.blurb}.`
+        toasts = [...toasts, { id, text, color: msg.color, first: msg.first }]
+        setTimeout(() => { toasts = toasts.filter((t) => t.id !== id) }, 7000)
+        break
+      }
       case 'snapshot':
         vessels = msg.vessels
         serverTime = msg.universeTime
@@ -162,6 +181,14 @@
 <div class="app">
   <canvas bind:this={canvas} class="scene" class:hidden={screen !== 'flight'}></canvas>
 
+  {#if toasts.length}
+    <div class="toasts">
+      {#each toasts as t (t.id)}
+        <div class="toast" class:first={t.first}><b style="color:{t.color}">{t.text}</b></div>
+      {/each}
+    </div>
+  {/if}
+
   {#if screen === 'menu'}
     <div class="overlay center">
       <div class="panel title-card">
@@ -189,6 +216,7 @@
           </tbody>
         </table>
         <div class="totals"><span>Total Δv <b>{vabDv} m/s</b></span><span>Mass <b>{vabMass} t</b></span></div>
+        <div class="agency">Agency &nbsp; <b>⬡ {(you?.funds ?? 0).toLocaleString()}</b> funds &nbsp;·&nbsp; <b>⚛ {you?.science ?? 0}</b> science</div>
         <input placeholder="Mission name" bind:value={vesselName} maxlength="32" />
         <button onclick={launch}>Roll out & Launch ▸</button>
         <div class="roster">{players.length} engineer{players.length === 1 ? '' : 's'} on the program{connected ? '' : ' (connecting…)'}</div>
@@ -207,6 +235,7 @@
         <div class="row"><span>Vert spd</span><b>{hud.verticalSpeed.toFixed(0)} m/s</b></div>
         <div class="row"><span>Stage</span><b>{hud.stage + 1}/{hud.stageCount} · {fmt(hud.fuel)} fuel</b></div>
         <div class="row"><span>TWR</span><b>{hud.twr.toFixed(2)}</b></div>
+        <div class="row"><span>Agency</span><b>⬡{(you?.funds ?? 0) >= 1000 ? ((you?.funds ?? 0) / 1000).toFixed(0) + 'k' : (you?.funds ?? 0)} · ⚛{you?.science ?? 0}</b></div>
         {#if hud.landed}<div class="orbit-flag landed">● LANDED on {hud.bodyName}</div>{:else if hud.inOrbit}<div class="orbit-flag">● STABLE ORBIT</div>{/if}
       </div>
 
@@ -254,6 +283,12 @@
   .totals { display: flex; gap: 22px; color: #9aa0a6; font-size: 14px; margin: 4px 0 6px; }
   .totals b { color: #e8eaed; }
   .roster { margin-top: 10px; color: #5a606a; font-size: 13px; text-align: center; }
+  .agency { margin: 8px 0 2px; color: #9aa0a6; font-size: 14px; text-align: center; }
+  .agency b { color: #f1c40f; }
+  .toasts { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 10; }
+  .toast { background: rgba(12, 16, 26, 0.9); border: 1px solid rgba(120, 170, 255, 0.25); border-radius: 999px; padding: 7px 16px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); animation: pop 0.25s ease-out; }
+  .toast.first { border-color: #f1c40f; box-shadow: 0 0 18px rgba(241,196,15,0.3); }
+  @keyframes pop { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   .hud { position: absolute; inset: 0; pointer-events: none; }
   .hud .panel { position: absolute; pointer-events: auto; }
   .readouts { top: 14px; left: 14px; min-width: 188px; padding: 12px 14px; }
