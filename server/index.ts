@@ -41,7 +41,19 @@ const CONTENT_TYPES: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 }
 
-const program = new Program(STATE_DIR)
+// One independent universe per room. The public "frontier" room is the MMO that
+// everyone joins by default; private rooms are created on first join by code.
+const rooms = new Map<string, Program>()
+const sanitizeRoom = (r: string): string =>
+  (r || 'frontier').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) || 'frontier'
+function room(id: string): Program {
+  let p = rooms.get(id)
+  if (!p) {
+    p = new Program(path.join(STATE_DIR, `room-${id}.json`))
+    rooms.set(id, p)
+  }
+  return p
+}
 
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void {
   const urlPath = decodeURIComponent((req.url || '/').split('?')[0])
@@ -73,16 +85,19 @@ const wss = new WebSocketServer({ server, path: '/ws' })
 interface Client {
   ws: WebSocket
   playerId?: string
+  room?: string
 }
 const clients = new Set<Client>()
 
 function send(ws: WebSocket, msg: ServerMsg): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(encode(msg))
 }
-function broadcast(msg: ServerMsg): void {
+// Broadcasts are scoped to a room — players only see their own universe.
+function broadcastRoom(roomId: string, msg: ServerMsg): void {
   const s = encode(msg)
-  for (const c of clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(s)
+  for (const c of clients) if (c.room === roomId && c.ws.readyState === WebSocket.OPEN) c.ws.send(s)
 }
+const progOf = (c: Client): Program | undefined => (c.room ? rooms.get(c.room) : undefined)
 
 wss.on('connection', (ws) => {
   const client: Client = { ws }
@@ -101,59 +116,69 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'error', message: `protocol mismatch (server ${PROTOCOL_VERSION})` })
           return
         }
-        const you = program.join(msg.name)
+        const roomId = sanitizeRoom(msg.room)
+        client.room = roomId
+        const prog = room(roomId)
+        const you = prog.join(msg.name)
         client.playerId = you.id
         send(ws, {
           type: 'welcome',
           you,
-          universeTime: program.universeTime(),
-          players: program.roster(),
-          vessels: program.allVessels(),
+          room: roomId,
+          universeTime: prog.universeTime(),
+          players: prog.roster(),
+          vessels: prog.allVessels(),
           build: BUILD_SHA,
         })
-        broadcast({ type: 'players', players: program.roster() })
+        broadcastRoom(roomId, { type: 'players', players: prog.roster() })
         break
       }
       case 'launch': {
-        const me = client.playerId && program.player(client.playerId)
-        if (!me) return
-        const v = program.createVessel(me, msg.vesselName, msg.bodyId || ROOT)
-        broadcast({ type: 'vesselCreated', vessel: v })
+        const prog = progOf(client)
+        const me = prog && client.playerId && prog.player(client.playerId)
+        if (!prog || !me) return
+        const v = prog.createVessel(me, msg.vesselName, msg.bodyId || ROOT)
+        broadcastRoom(client.room!, { type: 'vesselCreated', vessel: v })
         break
       }
       case 'flight': {
-        if (!client.playerId) return
-        program.updateFlight(msg.vesselId, client.playerId, {
+        const prog = progOf(client)
+        if (!prog || !client.playerId) return
+        prog.updateFlight(msg.vesselId, client.playerId, {
           x: msg.x, y: msg.y, vx: msg.vx, vy: msg.vy, heading: msg.heading, t: msg.t,
         })
         break
       }
       case 'settle': {
-        if (!client.playerId) return
-        program.settle(msg.vesselId, client.playerId, msg.orbit, msg.status, msg.bodyId)
+        const prog = progOf(client)
+        if (!prog || !client.playerId) return
+        prog.settle(msg.vesselId, client.playerId, msg.orbit, msg.status, msg.bodyId)
         break
       }
       case 'recover': {
-        if (!client.playerId) return
-        program.recover(msg.vesselId, client.playerId)
-        broadcast({ type: 'players', players: program.roster() })
+        const prog = progOf(client)
+        if (!prog || !client.playerId) return
+        prog.recover(msg.vesselId, client.playerId)
+        broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
         break
       }
       case 'milestone': {
-        const me = client.playerId && program.player(client.playerId)
-        if (!me) return
-        const res = program.awardMilestone(me.id, msg.kind)
+        const prog = progOf(client)
+        const me = prog && client.playerId && prog.player(client.playerId)
+        if (!prog || !me) return
+        const res = prog.awardMilestone(me.id, msg.kind)
         if (res?.newly) {
-          broadcast({ type: 'achievement', playerName: me.name, color: me.color, kind: msg.kind, funds: res.funds, science: res.science, first: res.first, ts: Date.now() })
-          broadcast({ type: 'players', players: program.roster() })
+          broadcastRoom(client.room!, { type: 'achievement', playerName: me.name, color: me.color, kind: msg.kind, funds: res.funds, science: res.science, first: res.first, ts: Date.now() })
+          broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
         }
         break
       }
       case 'chat': {
-        const me = client.playerId && program.player(client.playerId)
-        if (!me) return
+        const prog = progOf(client)
+        const me = prog && client.playerId && prog.player(client.playerId)
+        if (!prog || !me) return
         const text = msg.text.trim().slice(0, 280)
-        if (text) broadcast({ type: 'chat', from: me.name, color: me.color, text, ts: Date.now() })
+        if (text) broadcastRoom(client.room!, { type: 'chat', from: me.name, color: me.color, text, ts: Date.now() })
         break
       }
       case 'ping':
@@ -166,10 +191,15 @@ wss.on('connection', (ws) => {
   ws.on('error', () => clients.delete(client))
 })
 
-// Universe snapshot broadcast — the shared map heartbeat.
+// Per-room universe snapshot broadcast — the shared map heartbeat, scoped to each room.
 setInterval(() => {
   if (clients.size === 0) return
-  broadcast({ type: 'snapshot', universeTime: program.universeTime(), vessels: program.allVessels() })
+  const active = new Set<string>()
+  for (const c of clients) if (c.room) active.add(c.room)
+  for (const id of active) {
+    const prog = rooms.get(id)
+    if (prog) broadcastRoom(id, { type: 'snapshot', universeTime: prog.universeTime(), vessels: prog.allVessels() })
+  }
 }, 1000 / SNAPSHOT_HZ)
 
 server.listen(PORT, () => {

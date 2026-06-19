@@ -19,6 +19,7 @@ type Handler = (msg: ServerMsg) => void
 export class Net {
   private ws?: WebSocket
   private name = ''
+  private room = 'frontier'
   private handlers = new Set<Handler>()
   private backoff = 500
   connected = false
@@ -28,8 +29,9 @@ export class Net {
     return () => this.handlers.delete(h)
   }
 
-  connect(name: string): void {
+  connect(name: string, room: string): void {
     this.name = name
+    this.room = room
     this.open()
   }
 
@@ -40,7 +42,7 @@ export class Net {
     ws.onopen = () => {
       this.connected = true
       this.backoff = 500
-      this.send({ type: 'hello', name: this.name, protocol: PROTOCOL_VERSION })
+      this.send({ type: 'hello', name: this.name, room: this.room, protocol: PROTOCOL_VERSION })
     }
     ws.onmessage = (e) => {
       let msg: ServerMsg

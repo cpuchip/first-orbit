@@ -35,8 +35,8 @@ export class Program {
   private stateFile: string
   private dirty = false
 
-  constructor(stateDir: string) {
-    this.stateFile = path.join(stateDir, 'program.json')
+  constructor(stateFile: string) {
+    this.stateFile = stateFile
     const loaded = this.load()
     this.startWall = loaded?.startWall ?? Date.now()
     for (const p of loaded?.players ?? []) this.players.set(p.id, { ...p, achieved: p.achieved ?? [] })

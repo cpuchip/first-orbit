@@ -56,7 +56,7 @@ async function main() {
   console.log('First Orbit — wstest\n')
 
   const a = await connect()
-  send(a, { type: 'hello', name: 'Ada', protocol: PROTOCOL_VERSION })
+  send(a, { type: 'hello', name: 'Ada', room: 'frontier', protocol: PROTOCOL_VERSION })
   const welcome = await nextOfType(a, 'welcome')
   check('handshake -> welcome', !!welcome.you.id && welcome.players.length >= 1, `player=${welcome.you.name}`)
   check('welcome carries funds', welcome.you.funds > 0, `funds=${welcome.you.funds}`)
@@ -80,7 +80,7 @@ async function main() {
 
   // A second player sees the first player's vessel (shared program).
   const b = await connect()
-  send(b, { type: 'hello', name: 'Boyd', protocol: PROTOCOL_VERSION })
+  send(b, { type: 'hello', name: 'Boyd', room: 'frontier', protocol: PROTOCOL_VERSION })
   const welcomeB = await nextOfType(b, 'welcome')
   check('second player sees shared vessel', welcomeB.vessels.some((v) => v.id === vid), `vessels=${welcomeB.vessels.length}`)
 
@@ -99,7 +99,7 @@ async function main() {
   send(a, { type: 'milestone', vesselId: vid, kind: 'orbit' })
   await wait(150)
   const c = await connect()
-  send(c, { type: 'hello', name: 'Cyril', protocol: PROTOCOL_VERSION })
+  send(c, { type: 'hello', name: 'Cyril', room: 'frontier', protocol: PROTOCOL_VERSION })
   const wc = await nextOfType(c, 'welcome')
   const ada = wc.players.find((p) => p.name === 'Ada')!
   check(
@@ -108,7 +108,17 @@ async function main() {
     `funds=${ada.funds} achieved=${ada.achieved.join(',')}`,
   )
 
-  a.close(); b.close(); c.close()
+  // Room isolation: a player in a different room is in a separate universe.
+  const d = await connect()
+  send(d, { type: 'hello', name: 'Dax', room: 'private1', protocol: PROTOCOL_VERSION })
+  const wd = await nextOfType(d, 'welcome')
+  check(
+    'rooms are isolated',
+    wd.room === 'private1' && !wd.vessels.some((v) => v.id === vid) && wd.players.every((p) => p.name !== 'Ada'),
+    `room=${wd.room} vessels=${wd.vessels.length} players=${wd.players.map((p) => p.name).join(',')}`,
+  )
+
+  a.close(); b.close(); c.close(); d.close()
   console.log(`\n${passed} passed, ${failures.length} failed`)
   if (failures.length) { for (const f of failures) console.log(`  - ${f}`); process.exit(1) }
   console.log('wstest green ✓')

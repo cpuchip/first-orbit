@@ -38,7 +38,7 @@ export interface PlayerInfo {
 
 // ---- client -> server ----------------------------------------------------------
 export type ClientMsg =
-  | { type: 'hello'; name: string; protocol: number }
+  | { type: 'hello'; name: string; room: string; protocol: number }
   | { type: 'launch'; vesselName: string; bodyId: string }
   | { type: 'flight'; vesselId: string; x: number; y: number; vx: number; vy: number; heading: number; t: number }
   | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string }
@@ -49,7 +49,7 @@ export type ClientMsg =
 
 // ---- server -> client ----------------------------------------------------------
 export type ServerMsg =
-  | { type: 'welcome'; you: PlayerInfo; universeTime: number; players: PlayerInfo[]; vessels: VesselState[]; build: string }
+  | { type: 'welcome'; you: PlayerInfo; room: string; universeTime: number; players: PlayerInfo[]; vessels: VesselState[]; build: string }
   | { type: 'players'; players: PlayerInfo[] }
   | { type: 'snapshot'; universeTime: number; vessels: VesselState[] }
   | { type: 'vesselCreated'; vessel: VesselState }

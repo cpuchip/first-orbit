@@ -13,7 +13,9 @@
 
   let screen = $state<'menu' | 'vab' | 'flight'>('menu')
   let view = $state<'flight' | 'map'>('flight')
-  let callsign = $state('')
+  let callsign = $state(localStorage.getItem('fo-callsign') ?? '')
+  let roomCode = $state(localStorage.getItem('fo-room') ?? '')
+  let currentRoom = $state('frontier')
   let connected = $state(false)
   let players = $state<PlayerInfo[]>([])
   let vessels = $state<VesselState[]>([])
@@ -105,6 +107,7 @@
         players = msg.players
         vessels = msg.vessels
         you = msg.you
+        currentRoom = msg.room
         serverTime = msg.universeTime
         serverStamp = performanceNow()
         break
@@ -148,7 +151,12 @@
     const name = callsign.trim()
     if (!name) return
     callsign = name
-    net.connect(name)
+    const room = roomCode.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'frontier'
+    try {
+      localStorage.setItem('fo-callsign', name)
+      localStorage.setItem('fo-room', roomCode.trim())
+    } catch { /* private mode */ }
+    net.connect(name, room)
     screen = 'vab'
   }
 
@@ -291,7 +299,7 @@
 
   {#if showBoard && players.length && screen !== 'menu'}
     <div class="board panel">
-      <div class="board-title">SPACE PROGRAM · {players.length}</div>
+      <div class="board-title">{currentRoom === 'frontier' ? 'THE FRONTIER' : currentRoom.toUpperCase()} · {players.length}</div>
       {#each [...players].sort((a, b) => b.science - a.science || b.funds - a.funds) as p (p.id)}
         <div class="board-row" class:me={p.id === you?.id}>
           <span class="dot" style="background:{p.color}"></span>
@@ -311,8 +319,9 @@
         <p class="tagline">The universe is expanding. So are we.</p>
         <p class="sub">Build rockets. Reach orbit. Run a shared space program — the dawn of the Mars&#8209;field shipyards.</p>
         <input placeholder="Your callsign" bind:value={callsign} onkeydown={(e) => e.key === 'Enter' && enter()} maxlength="24" />
-        <button onclick={enter} disabled={!callsign.trim()}>Begin</button>
-        <div class="build">build {BUILD}</div>
+        <input class="room-input" placeholder="Room code (blank = public Frontier)" bind:value={roomCode} onkeydown={(e) => e.key === 'Enter' && enter()} maxlength="24" />
+        <button onclick={enter} disabled={!callsign.trim()}>{callsign && localStorage.getItem('fo-callsign') === callsign.trim() ? 'Rejoin' : 'Begin'}</button>
+        <div class="build">{roomCode.trim() ? `private room “${roomCode.trim()}”` : 'public Frontier (everyone)'} · build {BUILD}</div>
       </div>
     </div>
   {/if}
