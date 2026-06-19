@@ -1,6 +1,7 @@
 # First Orbit — multiplayer.
-# Local:  docker compose up --build   ->  http://localhost:8080 (open two tabs)
-# Deploy: Dokploy builds this compose; map orbit.cpuchip.net to `game` on 8080.
+# Deploy: Dokploy builds this compose and routes orbit.cpuchip.net -> game:8080
+#         via Traefik over the internal network (no host port published).
+# Local dev: use `npm run dev` (+ `npm run dev:server`), not this compose.
 
 services:
   game:
@@ -13,8 +14,13 @@ services:
     volumes:
       # persists the shared space program across redeploys/restarts
       - first-orbit-state:/data
-    ports:
-      - "8080:8080"
+    # No host port publish: the Dokploy VPS runs several apps that all listen on
+    # 8080 inside their container (deadweight, chattermax, …), so publishing host
+    # 8080 collides on bind. Traefik routes orbit.cpuchip.net -> game:8080 over the
+    # internal network using the exposed port. For local container testing, run:
+    #   docker run --rm -p 8080:8080 $(docker compose build -q game || echo first-orbit)
+    expose:
+      - "8080"
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/healthz']
       interval: 30s
