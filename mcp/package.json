@@ -1,0 +1,12 @@
+{
+  "name": "first-orbit-mcp",
+  "version": "0.1.0",
+  "description": "MCP server — let an AI buddy see and coordinate everyone's vessels in First Orbit.",
+  "type": "module",
+  "bin": { "first-orbit-mcp": "server.mjs" },
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1",
+    "zod": "^3"
+  }
+}

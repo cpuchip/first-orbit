@@ -11,8 +11,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import { Program } from './program.ts'
-import { SYSTEM, ROOT } from '../shared/bodies.ts'
-import { encode, decode, SNAPSHOT_HZ, PROTOCOL_VERSION, type ClientMsg, type ServerMsg } from '../shared/netproto.ts'
+import { SYSTEM, ROOT, bodyPosition } from '../shared/bodies.ts'
+import { elementsToState, apsides } from '../shared/orbit.ts'
+import { encode, decode, SNAPSHOT_HZ, PROTOCOL_VERSION, type ClientMsg, type ServerMsg, type VesselState } from '../shared/netproto.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
@@ -79,7 +80,81 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void 
   }
 }
 
-const server = http.createServer(serveStatic)
+// ---- read/chat API for the AI-buddy MCP server --------------------------------
+function sendJson(res: http.ServerResponse, obj: unknown, status = 200): void {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' })
+  res.end(JSON.stringify(obj))
+}
+
+/** A vessel as the API reports it: current world position + orbit summary. */
+function vesselReport(v: VesselState, t: number): Record<string, unknown> {
+  const body = SYSTEM[v.bodyId] ?? SYSTEM[ROOT]
+  let pos: { x: number; y: number } | null = null
+  let periapsisAlt: number | null = null
+  let apoapsisAlt: number | null = null
+  if (v.orbit) {
+    const rel = elementsToState(v.orbit, t).pos
+    const bp = bodyPosition(SYSTEM, v.bodyId, t)
+    pos = { x: rel.x + bp.x, y: rel.y + bp.y }
+    const ap = apsides(v.orbit)
+    periapsisAlt = Math.round(ap.periapsis - body.radius)
+    apoapsisAlt = ap.apoapsis === Infinity ? null : Math.round(ap.apoapsis - body.radius)
+  } else if (v.flight) {
+    pos = { x: v.flight.x, y: v.flight.y }
+  }
+  return {
+    id: v.id, name: v.name, owner: v.ownerName, status: v.status, body: body.name,
+    x: pos ? Math.round(pos.x) : null, y: pos ? Math.round(pos.y) : null,
+    periapsisAlt, apoapsisAlt,
+  }
+}
+
+function handleApi(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const url = (req.url || '/').split('?')[0]
+  if (!url.startsWith('/api/')) return false
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' })
+    res.end()
+    return true
+  }
+  if (url === '/api/rooms') {
+    sendJson(res, { rooms: [...rooms.entries()].map(([id, p]) => ({ id, players: p.roster().length, vessels: p.allVessels().length })) })
+    return true
+  }
+  const stateM = url.match(/^\/api\/room\/([a-z0-9-]+)\/state$/)
+  if (stateM && req.method === 'GET') {
+    const prog = rooms.get(stateM[1])
+    if (!prog) return sendJson(res, { error: `room "${stateM[1]}" has no players yet` }, 404), true
+    const t = prog.universeTime()
+    sendJson(res, { room: stateM[1], universeTime: Math.round(t), players: prog.roster(), vessels: prog.allVessels().map((v) => vesselReport(v, t)) })
+    return true
+  }
+  const sayM = url.match(/^\/api\/room\/([a-z0-9-]+)\/say$/)
+  if (sayM && req.method === 'POST') {
+    let body = ''
+    req.on('data', (c) => { body += c; if (body.length > 4000) req.destroy() })
+    req.on('end', () => {
+      try {
+        const { from, text } = JSON.parse(body || '{}') as { from?: string; text?: string }
+        const id = sayM[1]
+        const t = (text ?? '').toString().trim().slice(0, 280)
+        if (!rooms.has(id)) return sendJson(res, { ok: false, error: 'no such room' }, 404)
+        if (!t) return sendJson(res, { ok: false, error: 'empty text' }, 400)
+        broadcastRoom(id, { type: 'chat', from: (from ?? 'Mission Control').toString().slice(0, 24), color: '#7fb0ff', text: t, ts: Date.now() })
+        sendJson(res, { ok: true })
+      } catch {
+        sendJson(res, { ok: false, error: 'bad json' }, 400)
+      }
+    })
+    return true
+  }
+  sendJson(res, { error: 'unknown endpoint' }, 404)
+  return true
+}
+
+const server = http.createServer((req, res) => {
+  if (!handleApi(req, res)) serveStatic(req, res)
+})
 const wss = new WebSocketServer({ server, path: '/ws' })
 
 interface Client {
