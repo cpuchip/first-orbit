@@ -14,7 +14,6 @@
   let screen = $state<'menu' | 'vab' | 'flight'>('menu')
   let view = $state<'flight' | 'map'>('flight')
   let callsign = $state('')
-  let vesselName = $state('Pathfinder I')
   let connected = $state(false)
   let players = $state<PlayerInfo[]>([])
   let vessels = $state<VesselState[]>([])
@@ -43,12 +42,58 @@
   let canvas: HTMLCanvasElement
   let ctx: CanvasRenderingContext2D
 
-  // VAB readout for the reference rocket.
-  const rocket = referenceRocket()
-  const perf = stagePerformance(rocket)
+  // --- Vehicle Assembly: an editable, persisted rocket design ---------------
+  type StageDesign = { engine: 'none' | 'main' | 'vac'; engineCount: number; tanks: number; tankSize: 'small' | 'large'; fins: boolean }
+  type Design = { name: string; stages: StageDesign[] }
+  const PRESETS: Record<string, Design> = {
+    Sounding: { name: 'Sounding I', stages: [{ engine: 'main', engineCount: 1, tanks: 1, tankSize: 'small', fins: true }] },
+    Orbiter: { name: 'Pathfinder I', stages: [{ engine: 'main', engineCount: 1, tanks: 1, tankSize: 'large', fins: true }, { engine: 'vac', engineCount: 1, tanks: 1, tankSize: 'small', fins: false }] },
+    Munar: { name: 'Selene I', stages: [{ engine: 'main', engineCount: 3, tanks: 2, tankSize: 'large', fins: true }, { engine: 'main', engineCount: 1, tanks: 1, tankSize: 'large', fins: false }, { engine: 'vac', engineCount: 1, tanks: 2, tankSize: 'small', fins: false }] },
+  }
+  const defaultDesign = (): Design => structuredClone(PRESETS.Orbiter)
+  function loadDesign(): Design | null {
+    try {
+      const d = JSON.parse(localStorage.getItem('fo-design') || 'null')
+      return d && Array.isArray(d.stages) && d.stages.length ? d : null
+    } catch {
+      return null
+    }
+  }
+  let design = $state<Design>(loadDesign() ?? defaultDesign())
   const g = surfaceGravity(terra)
-  const vabDv = Math.round(totalDeltaV(rocket))
-  const vabMass = (totalMass(rocket) / 1000).toFixed(1)
+
+  function buildVehicle(d: Design) {
+    const stages = d.stages.map((s, i) => {
+      const ids: string[] = []
+      const ec = Math.max(0, s.engineCount ?? 1)
+      if (s.engine !== 'none') for (let e = 0; e < ec; e++) ids.push(s.engine === 'main' ? 'engine-main' : 'engine-vac')
+      for (let t = 0; t < s.tanks; t++) ids.push(s.tankSize === 'large' ? 'tank-large' : 'tank-small')
+      if (s.fins) ids.push('fin', 'fin')
+      if (i < d.stages.length - 1) ids.push('decoupler') // separates this stage from the one above
+      if (i === d.stages.length - 1) ids.push('cmd-pod') // crew pod rides the top stage
+      return { partIds: ids }
+    })
+    return { name: d.name || 'Unnamed', stages }
+  }
+  let vehicle = $derived(buildVehicle(design))
+  let perf = $derived(stagePerformance(vehicle))
+  let vabDv = $derived(Math.round(totalDeltaV(vehicle)))
+  let vabMass = $derived((totalMass(vehicle) / 1000).toFixed(1))
+  $effect(() => {
+    try { localStorage.setItem('fo-design', JSON.stringify(design)) } catch { /* private mode */ }
+  })
+
+  const setEngine = (i: number, e: StageDesign['engine']) => (design.stages[i].engine = e)
+  const addEngine = (i: number, d: number) => (design.stages[i].engineCount = Math.max(1, Math.min(6, (design.stages[i].engineCount ?? 1) + d)))
+  const addTank = (i: number, d: number) => (design.stages[i].tanks = Math.max(0, Math.min(8, design.stages[i].tanks + d)))
+  const setTankSize = (i: number, sz: StageDesign['tankSize']) => (design.stages[i].tankSize = sz)
+  const toggleFins = (i: number) => (design.stages[i].fins = !design.stages[i].fins)
+  function addStage() {
+    if (design.stages.length < 5) design.stages = [{ engine: 'main', tanks: 1, tankSize: 'large', fins: false }, ...design.stages]
+  }
+  const removeStage = (i: number) => { if (design.stages.length > 1) design.stages = design.stages.filter((_, j) => j !== i) }
+  const applyPreset = (name: keyof typeof PRESETS) => (design = structuredClone(PRESETS[name]))
+  let pendingVehicle = referenceRocket()
 
   net.on((msg: ServerMsg) => {
     switch (msg.type) {
@@ -82,7 +127,7 @@
       case 'vesselCreated':
         vessels = [...vessels, msg.vessel]
         if (msg.vessel.ownerName === callsign && screen === 'vab') {
-          game.launch(rocket, msg.vessel.id)
+          game.launch(pendingVehicle, msg.vessel.id)
           screen = 'flight'
           view = 'flight'
         }
@@ -105,7 +150,8 @@
   }
 
   function launch() {
-    net.send({ type: 'launch', vesselName: vesselName.trim() || 'Unnamed', bodyId: ROOT })
+    pendingVehicle = buildVehicle(design)
+    net.send({ type: 'launch', vesselName: design.name.trim() || 'Unnamed', bodyId: ROOT })
   }
 
   function recover() {
@@ -221,19 +267,49 @@
   {#if screen === 'vab'}
     <div class="overlay center">
       <div class="panel vab">
-        <h2>Vehicle Assembly — {rocket.name}</h2>
-        <p class="sub">A proven two-stage stack. Full assembly editing is coming; for now she flies as designed.</p>
-        <table class="stats">
-          <thead><tr><th>Stage</th><th>Δv (m/s)</th><th>Thrust (kN)</th><th>TWR</th></tr></thead>
-          <tbody>
-            {#each perf as s}
-              <tr><td>{s.index === 0 ? 'Booster' : 'Upper ' + s.index}</td><td>{Math.round(s.deltaV)}</td><td>{(s.thrust / 1000).toFixed(0)}</td><td>{s.twr(g).toFixed(2)}</td></tr>
-            {/each}
-          </tbody>
-        </table>
-        <div class="totals"><span>Total Δv <b>{vabDv} m/s</b></span><span>Mass <b>{vabMass} t</b></span></div>
+        <h2>Vehicle Assembly</h2>
+        <div class="presets">
+          <span>Presets</span>
+          <button class="chip" onclick={() => applyPreset('Sounding')}>Sounding</button>
+          <button class="chip" onclick={() => applyPreset('Orbiter')}>Orbiter</button>
+          <button class="chip" onclick={() => applyPreset('Munar')}>Munar</button>
+        </div>
+        <div class="stages">
+          {#each design.stages as s, i}
+            <div class="stage">
+              <div class="stage-head">
+                <b>Stage {i + 1}{i === design.stages.length - 1 ? ' · crew' : ''}</b>
+                <span class="stage-perf">{Math.round(perf[i].deltaV)} m/s · TWR {perf[i].twr(g).toFixed(1)}</span>
+                {#if design.stages.length > 1}<button class="x" onclick={() => removeStage(i)} title="remove stage">✕</button>{/if}
+              </div>
+              <div class="stage-row">
+                <span class="lbl">Engine</span>
+                <button class="opt" class:sel={s.engine === 'main'} onclick={() => setEngine(i, 'main')}>Main</button>
+                <button class="opt" class:sel={s.engine === 'vac'} onclick={() => setEngine(i, 'vac')}>Vac</button>
+                <button class="opt" class:sel={s.engine === 'none'} onclick={() => setEngine(i, 'none')}>None</button>
+                {#if s.engine !== 'none'}
+                  <button class="opt" onclick={() => addEngine(i, -1)}>−</button>
+                  <span class="count">×{s.engineCount ?? 1}</span>
+                  <button class="opt" onclick={() => addEngine(i, 1)}>+</button>
+                {/if}
+              </div>
+              <div class="stage-row">
+                <span class="lbl">Tanks</span>
+                <button class="opt" onclick={() => addTank(i, -1)}>−</button>
+                <span class="count">{s.tanks}</span>
+                <button class="opt" onclick={() => addTank(i, 1)}>+</button>
+                <button class="opt" class:sel={s.tankSize === 'small'} onclick={() => setTankSize(i, 'small')}>S</button>
+                <button class="opt" class:sel={s.tankSize === 'large'} onclick={() => setTankSize(i, 'large')}>L</button>
+                <button class="opt fins" class:sel={s.fins} onclick={() => toggleFins(i)}>Fins</button>
+              </div>
+            </div>
+          {/each}
+        </div>
+        <button class="chip add" onclick={addStage} disabled={design.stages.length >= 5}>+ Add booster stage (bottom)</button>
+        <div class="totals"><span>Δv <b class:warn={vabDv < 3400}>{vabDv} m/s</b></span><span>Mass <b>{vabMass} t</b></span><span>Stages <b>{design.stages.length}</b></span></div>
+        <div class="hint">{vabDv < 3400 ? '⚠ ~3400 m/s needed to reach Terra orbit' : '✓ enough Δv for orbit — Luna wants ~5500+'}</div>
         <div class="agency">Agency &nbsp; <b>⬡ {(you?.funds ?? 0).toLocaleString()}</b> funds &nbsp;·&nbsp; <b>⚛ {you?.science ?? 0}</b> science</div>
-        <input placeholder="Mission name" bind:value={vesselName} maxlength="32" />
+        <input placeholder="Vehicle name" bind:value={design.name} maxlength="32" />
         <button onclick={launch}>Roll out & Launch ▸</button>
         <div class="roster">{players.length} engineer{players.length === 1 ? '' : 's'} on the program{connected ? '' : ' (connecting…)'}</div>
       </div>
@@ -306,12 +382,26 @@
   button { width: 100%; padding: 11px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
   button:disabled { opacity: 0.4; cursor: default; }
   .build { margin-top: 12px; color: #5a606a; font-size: 12px; }
-  .vab { max-width: 520px; }
-  .stats { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
-  .stats th, .stats td { text-align: right; padding: 6px 10px; border-bottom: 1px solid #1c2331; }
-  .stats th:first-child, .stats td:first-child { text-align: left; }
-  .totals { display: flex; gap: 22px; color: #9aa0a6; font-size: 14px; margin: 4px 0 6px; }
+  .vab { max-width: 540px; max-height: 88vh; overflow-y: auto; }
+  .presets { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; color: #7a808a; font-size: 13px; }
+  .chip { width: auto; padding: 5px 12px; background: #1a2130; color: #c8ccd2; font-size: 13px; font-weight: 500; }
+  .chip.add { width: 100%; margin: 10px 0 4px; background: #16203a; color: #7fb0ff; }
+  .stages { display: flex; flex-direction: column; gap: 8px; }
+  .stage { background: #0c111c; border: 1px solid #1c2331; border-radius: 8px; padding: 10px 12px; }
+  .stage-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .stage-head b { font-size: 14px; }
+  .stage-perf { color: #9aa0a6; font-size: 12px; margin-left: auto; }
+  .x { width: auto; padding: 2px 8px; background: #2a1c1c; color: #e57373; font-size: 12px; }
+  .stage-row { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+  .lbl { width: 56px; color: #7a808a; font-size: 13px; }
+  .opt { width: auto; padding: 4px 10px; background: #161c28; color: #aeb4bc; font-size: 12px; font-weight: 500; }
+  .opt.sel { background: #2f6fed; color: #fff; }
+  .opt.fins.sel { background: #2ecc71; }
+  .count { min-width: 18px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .totals { display: flex; gap: 22px; color: #9aa0a6; font-size: 14px; margin: 10px 0 2px; }
   .totals b { color: #e8eaed; }
+  .totals b.warn { color: #e57373; }
+  .hint { font-size: 12px; color: #7a808a; margin-bottom: 6px; }
   .roster { margin-top: 10px; color: #5a606a; font-size: 13px; text-align: center; }
   .agency { margin: 8px 0 2px; color: #9aa0a6; font-size: 14px; text-align: center; }
   .agency b { color: #f1c40f; }
