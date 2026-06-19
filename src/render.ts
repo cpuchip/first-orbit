@@ -169,6 +169,12 @@ export function drawFlight(
     ctx.lineTo(pg.x + 6, pg.y)
     ctx.stroke()
   }
+
+  // Target reticle, if it's in view.
+  if (game.target && game.targetPos) {
+    const sc = toScreen(game.targetPos)
+    if (sc.x > -40 && sc.x < w + 40 && sc.y > -40 && sc.y < h + 40) drawReticle(ctx, sc, game.target.name)
+  }
 }
 
 function drawVessel(ctx: CanvasRenderingContext2D, p: Vec2, heading: number, s: number, throttle: number, hasFuel: boolean): void {
@@ -335,6 +341,29 @@ export function drawMap(
     ctx.font = '10px system-ui, sans-serif'
     ctx.fillText('you', sc.x + 7, sc.y - 6)
   }
+
+  // Target reticle.
+  if (game.target && game.targetPos) {
+    drawReticle(ctx, toScreen(game.targetPos), game.target.name)
+  }
+}
+
+function drawReticle(ctx: CanvasRenderingContext2D, sc: { x: number; y: number }, name: string): void {
+  ctx.strokeStyle = '#c39bd3'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.arc(sc.x, sc.y, 11, 0, Math.PI * 2)
+  ctx.stroke()
+  for (const deg of [0, 90, 180, 270]) {
+    const a = (deg * Math.PI) / 180
+    ctx.beginPath()
+    ctx.moveTo(sc.x + Math.cos(a) * 11, sc.y + Math.sin(a) * 11)
+    ctx.lineTo(sc.x + Math.cos(a) * 16, sc.y + Math.sin(a) * 16)
+    ctx.stroke()
+  }
+  ctx.fillStyle = '#c39bd3'
+  ctx.font = '10px system-ui, sans-serif'
+  ctx.fillText(`◎ ${name}`, sc.x + 14, sc.y + 4)
 }
 
 function mark(ctx: CanvasRenderingContext2D, p: Vec2, color: string): void {

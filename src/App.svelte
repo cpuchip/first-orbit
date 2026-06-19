@@ -2,9 +2,10 @@
   import { onMount } from 'svelte'
   import { Net } from './net.ts'
   import { Game } from './game.ts'
-  import { drawFlight, drawMap, mapScale } from './render.ts'
+  import { drawFlight, drawMap, mapScale, vesselWorldPos } from './render.ts'
   import { referenceRocket, performance as stagePerformance, totalDeltaV, totalMass } from '../shared/vehicle.ts'
-  import { SYSTEM, ROOT, surfaceGravity } from '../shared/bodies.ts'
+  import { SYSTEM, ROOT, surfaceGravity, bodyPosition, bodyVelocity } from '../shared/bodies.ts'
+  import { elementsToState } from '../shared/orbit.ts'
   import type { PlayerInfo, VesselState, ServerMsg } from '../shared/netproto.ts'
   import { MILESTONES } from '../shared/milestones.ts'
 
@@ -171,6 +172,48 @@
     screen = 'vab'
   }
 
+  // World position + velocity of a targetable object at universe time t.
+  function objectState(kind: 'vessel' | 'body', id: string, t: number): { pos: { x: number; y: number }; vel: { x: number; y: number } } | null {
+    if (kind === 'body') return { pos: bodyPosition(SYSTEM, id, t), vel: bodyVelocity(SYSTEM, id, t) }
+    const v = vessels.find((x) => x.id === id)
+    if (!v) return null
+    if (v.orbit) {
+      const s = elementsToState(v.orbit, t)
+      const bp = bodyPosition(SYSTEM, v.bodyId, t)
+      const bv = bodyVelocity(SYSTEM, v.bodyId, t)
+      return { pos: { x: s.pos.x + bp.x, y: s.pos.y + bp.y }, vel: { x: s.vel.x + bv.x, y: s.vel.y + bv.y } }
+    }
+    if (v.flight) return { pos: { x: v.flight.x, y: v.flight.y }, vel: { x: v.flight.vx, y: v.flight.vy } }
+    return null
+  }
+
+  // Right-click on the map picks the nearest body/vessel as the target (or clears it).
+  function pickTarget(clientX: number, clientY: number) {
+    if (view !== 'map' || screen !== 'flight') return
+    const rect = canvas.getBoundingClientRect()
+    const sx = clientX - rect.left
+    const sy = clientY - rect.top
+    const t = universeTime()
+    const s = mapScale(canvas.width, canvas.height, mapZoom)
+    const toScreen = (p: { x: number; y: number }) => ({ x: canvas.width / 2 + (p.x - mapCenter.x) * s, y: canvas.height / 2 - (p.y - mapCenter.y) * s })
+    let best: { kind: 'vessel' | 'body'; id: string; name: string } | null = null
+    let bestD = 26
+    for (const b of Object.values(SYSTEM)) {
+      const sc = toScreen(bodyPosition(SYSTEM, b.id, t))
+      const d = Math.hypot(sc.x - sx, sc.y - sy)
+      if (d < bestD) { bestD = d; best = { kind: 'body', id: b.id, name: b.name } }
+    }
+    for (const v of vessels) {
+      if (v.id === game.vesselId) continue
+      const p = vesselWorldPos(v, t)
+      if (!p) continue
+      const sc = toScreen(p)
+      const d = Math.hypot(sc.x - sx, sc.y - sy)
+      if (d < bestD) { bestD = d; best = { kind: 'vessel', id: v.id, name: `${v.name} · ${v.ownerName}` } }
+    }
+    game.setTarget(best)
+  }
+
   function sendChat() {
     const t = chatInput.trim()
     if (t) net.send({ type: 'chat', text: t })
@@ -233,6 +276,12 @@
       resize()
       if (screen === 'flight') {
         pollKeys(dt)
+        // feed the target's live position/velocity to the game (or clear if it's gone)
+        if (game.target) {
+          const ts = objectState(game.target.kind, game.target.id, universeTime())
+          if (ts) { game.targetPos = ts.pos; game.targetVel = ts.vel }
+          else game.setTarget(null)
+        }
         game.update(dt)
         hud = game.readout()
         nodeInfo = game.nodeReadout()
@@ -266,10 +315,16 @@
       lastX = e.clientX; lastY = e.clientY
     }
     const onUp = () => { dragging = false }
+    // Disable the browser context menu everywhere; right-click the map to target.
+    const onContext = (e: MouseEvent) => {
+      e.preventDefault()
+      if (e.target === canvas) pickTarget(e.clientX, e.clientY)
+    }
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('pointerdown', onDown)
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('contextmenu', onContext)
 
     raf = requestAnimationFrame(frame)
     window.addEventListener('keydown', onKeyDown)
@@ -282,6 +337,7 @@
       canvas.removeEventListener('pointerdown', onDown)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('contextmenu', onContext)
     }
   })
 
@@ -452,7 +508,7 @@
           <button class="mc" onclick={() => (mapZoom = Math.min(80, mapZoom * 1.4))}>+</button>
           <button class="mc wide" class:on={mapFollow} onclick={() => (mapFollow = !mapFollow)}>⊙ Follow</button>
           <button class="mc wide" onclick={() => { mapCenter = { x: 0, y: 0 }; mapFollow = false; mapZoom = 1 }}>⌖ Reset</button>
-          <span class="mc-hint">scroll = zoom · drag = pan</span>
+          <span class="mc-hint">scroll = zoom · drag = pan · right-click = target</span>
         </div>
       {/if}
     </div>
