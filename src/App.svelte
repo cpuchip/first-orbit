@@ -344,6 +344,11 @@
                 <span class="stage-perf">{Math.round(perf[i].deltaV)} m/s · TWR {perf[i].twr(g).toFixed(1)}</span>
                 {#if design.stages.length > 1}<button class="x" onclick={() => removeStage(i)} title="remove stage">✕</button>{/if}
               </div>
+              <div class="stage-icons">
+                {#if i === design.stages.length - 1}<img src="/assets/part-cmd-pod.png" alt="pod" title="Command Pod" />{/if}
+                {#each Array.from({ length: s.tanks }) as _, t (t)}<img src="/assets/part-tank.png" alt="tank" title="Fuel Tank ({s.tankSize})" class:large={s.tankSize === 'large'} />{/each}
+                {#if s.engine !== 'none'}{#each Array.from({ length: s.engineCount ?? 1 }) as _, e (e)}<img src={s.engine === 'main' ? '/assets/part-engine-main.png' : '/assets/part-engine-vac.png'} alt="engine" title="{s.engine} engine" />{/each}{/if}
+              </div>
               <div class="stage-row">
                 <span class="lbl">Engine</span>
                 <button class="opt" class:sel={s.engine === 'main'} onclick={() => setEngine(i, 'main')}>Main</button>
@@ -462,6 +467,9 @@
   .chip.add { width: 100%; margin: 10px 0 4px; background: #16203a; color: #7fb0ff; }
   .stages { display: flex; flex-direction: column; gap: 8px; }
   .stage { background: #0c111c; border: 1px solid #1c2331; border-radius: 8px; padding: 10px 12px; }
+  .stage-icons { display: flex; align-items: center; gap: 2px; margin-bottom: 8px; min-height: 30px; flex-wrap: wrap; }
+  .stage-icons img { height: 26px; width: auto; object-fit: contain; opacity: 0.92; }
+  .stage-icons img.large { height: 34px; }
   .stage-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
   .stage-head b { font-size: 14px; }
   .stage-perf { color: #9aa0a6; font-size: 12px; margin-left: auto; }
