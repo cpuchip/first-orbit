@@ -1,8 +1,9 @@
 node_modules
 dist
-.git
 .env
 .env.local
 *.log
 .playwright-cli
 data
+# NOTE: .git is intentionally NOT ignored — the Dockerfile reads the commit sha
+# from it to stamp /version (the deploy oracle), then removes it from the image.
