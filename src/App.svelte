@@ -270,6 +270,7 @@
   {#if screen === 'menu'}
     <div class="overlay center">
       <div class="panel title-card">
+        <img class="logo" src="/assets/logo.png" alt="First Orbit" width="160" height="160" />
         <h1>FIRST ORBIT</h1>
         <p class="tagline">The universe is expanding. So are we.</p>
         <p class="sub">Build rockets. Reach orbit. Run a shared space program — the dawn of the Mars&#8209;field shipyards.</p>
@@ -391,6 +392,7 @@
   .center { display: flex; align-items: center; justify-content: center; }
   .panel { background: rgba(12, 16, 26, 0.82); border: 1px solid rgba(120, 170, 255, 0.18); border-radius: 10px; padding: 18px; backdrop-filter: blur(4px); }
   .title-card { max-width: 460px; text-align: center; }
+  .logo { display: block; margin: 0 auto 8px; filter: drop-shadow(0 4px 16px rgba(0,0,0,0.5)); }
   h1 { font-size: 44px; letter-spacing: 6px; margin: 0 0 4px; font-weight: 800; }
   .tagline { color: #7fb0ff; margin: 0 0 14px; font-style: italic; }
   .sub { color: #9aa0a6; font-size: 14px; line-height: 1.5; }

@@ -1,7 +1,7 @@
 {
   "outDir": "public/assets",
   "assets": [
-    { "name": "logo", "prompt": "An emblem/wordmark badge for a space program called FIRST ORBIT: a thin circular orbit line around a small blue world, a single rocket arcing up off the surface. Minimal, embroidered-patch feel, dark background." },
+    { "name": "logo", "prompt": "A clean circular mission emblem for a space program: a thin glowing orbit ring around a small blue world with a single rocket arcing up off the surface, crisp vector-style insignia (NOT a fabric patch, no backing card, no rectangle). Fully transparent background (alpha channel), the badge floats with nothing behind it. No text." },
     { "name": "terra", "prompt": "A small Earth-like home planet as a top-down circular disk: blue oceans, scattered green-brown landmasses, thin white cloud bands, a soft day/night terminator on the right edge. Game map planet token." },
     { "name": "luna", "prompt": "A small airless grey moon as a top-down circular disk: cratered regolith, subtle maria, soft terminator. Game map moon token." },
     { "name": "part-cmd-pod", "prompt": "A one-person reentry command capsule, side view, nose up: blunt cone, heat-shield base, a single round window, brushed-metal hull. 2D game part icon, transparent background." },

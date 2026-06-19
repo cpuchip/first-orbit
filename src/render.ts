@@ -21,6 +21,36 @@ const STARS = Array.from({ length: 220 }, () => ({
   b: 0.3 + Math.random() * 0.7,
 }))
 
+// Lazy-loaded body textures (generated art). Falls back to a flat disk until loaded.
+const bodyImages: Record<string, HTMLImageElement> = {}
+function loadedBodyImage(id: string): HTMLImageElement | null {
+  let img = bodyImages[id]
+  if (!img) {
+    img = new Image()
+    img.src = `/assets/${id}.png`
+    bodyImages[id] = img
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null
+}
+
+/** Draw a body as its texture clipped to a circle, or a flat disk if the art isn't ready. */
+function drawBodyDisk(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, id: string, color: string): void {
+  const img = r > 5 ? loadedBodyImage(id) : null
+  if (img) {
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2)
+    ctx.restore()
+  } else {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fillStyle = color
+    ctx.fill()
+  }
+}
+
 function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, alpha: number): void {
   if (alpha <= 0) return
   ctx.save()
@@ -93,10 +123,7 @@ export function drawFlight(
     const bc = toScreen(bodyPosition(SYSTEM, b.id, st.t))
     const br = b.radius * s
     if (br < 0.5 && Math.hypot(bc.x - w / 2, bc.y - h / 2) > Math.hypot(w, h)) continue
-    ctx.beginPath()
-    ctx.arc(bc.x, bc.y, br, 0, Math.PI * 2)
-    ctx.fillStyle = b.color
-    ctx.fill()
+    drawBodyDisk(ctx, bc.x, bc.y, br, b.id, b.color)
     if (b.atmosphere) {
       ctx.beginPath()
       ctx.arc(bc.x, bc.y, (b.radius + b.atmosphere.height) * s, 0, Math.PI * 2)
@@ -228,10 +255,7 @@ export function drawMap(
       ctx.lineWidth = 1
       ctx.stroke()
     }
-    ctx.beginPath()
-    ctx.arc(sc.x, sc.y, Math.max(3, b.radius * s), 0, Math.PI * 2)
-    ctx.fillStyle = b.color
-    ctx.fill()
+    drawBodyDisk(ctx, sc.x, sc.y, Math.max(3, b.radius * s), b.id, b.color)
     ctx.fillStyle = 'rgba(255,255,255,0.7)'
     ctx.font = '11px system-ui, sans-serif'
     ctx.fillText(b.name, sc.x + Math.max(5, b.radius * s) + 3, sc.y + 3)
