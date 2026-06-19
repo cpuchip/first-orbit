@@ -191,6 +191,10 @@
     if (k === 'r') recover()
     if (k === '.') game.warp = Math.min(100000, game.warp * 10)
     if (k === ',') game.warp = Math.max(1, game.warp / 10)
+    // SAS heading hold
+    if (k === 'q') game.setHold('prograde')
+    if (k === 'e') game.setHold('retrograde')
+    if (k === 't' && game.target) game.setHold('target')
     // maneuver node editing
     if (k === 'n') game.toggleNode()
     if (game.node) {
@@ -202,8 +206,7 @@
       if (k === 'j') game.adjustNode(0, -dv)
       if (k === 'o') game.moveNode(ts)
       if (k === 'u') game.moveNode(-ts)
-      if (k === 'b') game.executeNode()
-      if (k === 'y') game.toggleWarpToNode()
+      if (k === 'b') game.armNode()
     }
   }
   function onKeyUp(e: KeyboardEvent) {
@@ -395,6 +398,7 @@
         <div class="row"><span>Stage</span><b>{hud.stage + 1}/{hud.stageCount} · {fmt(hud.fuel)} fuel</b></div>
         <div class="row"><span>TWR</span><b>{hud.twr.toFixed(2)}</b></div>
         <div class="row"><span>Agency</span><b>⬡{(you?.funds ?? 0) >= 1000 ? ((you?.funds ?? 0) / 1000).toFixed(0) + 'k' : (you?.funds ?? 0)} · ⚛{you?.science ?? 0}</b></div>
+        {#if hud.targetName}<div class="row tgt"><span>◎ {hud.targetName}</span><b>{km(hud.targetDist ?? 0)}{hud.targetRelSpeed != null ? ` · ${hud.targetRelSpeed.toFixed(0)} m/s` : ''}</b></div>{/if}
         {#if hud.landed}<div class="orbit-flag landed">● LANDED on {hud.bodyName}</div>{:else if hud.inOrbit}<div class="orbit-flag">● STABLE ORBIT</div>{/if}
       </div>
 
@@ -407,21 +411,32 @@
         <span class:on={hud.autopilot}>[G] Autopilot {hud.autopilot ? 'ON' : 'off'}</span>
         <span>[Space] Stage</span>
         <span>[A/D] Rotate · [W/S] Throttle</span>
-        <span>[,/.] Warp {hud.warp}×</span>
+        <span class:on={hud.hold !== 'off'}>[Q/E] SAS{hud.hold !== 'off' ? ' · ' + hud.hold : ''}</span>
+        <span>[,/.] Warp {hud.warp}×{hud.burning ? ' · 🔥' : ''}</span>
         <span class:on={!!nodeInfo}>[N] Maneuver node {nodeInfo ? '✓' : ''}</span>
         <span>[M] {view === 'map' ? 'Flight' : 'Map'} · [R] Recover · [P] Standings</span>
       </div>
 
+      <div class="sas panel">
+        <div class="sas-title">SAS</div>
+        <button class="sasb" class:on={hud.hold === 'prograde'} onclick={() => game.setHold('prograde')}>Pro</button>
+        <button class="sasb" class:on={hud.hold === 'retrograde'} onclick={() => game.setHold('retrograde')}>Retro</button>
+        <button class="sasb" class:on={hud.hold === 'radial-out'} onclick={() => game.setHold('radial-out')}>Rad+</button>
+        <button class="sasb" class:on={hud.hold === 'radial-in'} onclick={() => game.setHold('radial-in')}>Rad−</button>
+        {#if game.node}<button class="sasb" class:on={hud.hold === 'node'} onclick={() => game.setHold('node')}>Node</button>{/if}
+        {#if hud.targetName}<button class="sasb tgt" class:on={hud.hold === 'target'} onclick={() => game.setHold('target')}>Tgt</button>{/if}
+      </div>
+
       {#if nodeInfo}
-        <div class="node panel">
-          <div class="node-title">⬗ MANEUVER {nodeInfo.executing ? '· BURNING' : ''}</div>
-          <div class="row"><span>Δv</span><b>{nodeInfo.dv.toFixed(0)} m/s</b></div>
+        <div class="node panel" class:armed={nodeInfo.armed}>
+          <div class="node-title">⬗ MANEUVER {nodeInfo.executing ? '· 🔥 BURNING' : nodeInfo.armed ? '· ARMED ▸ warping/burning' : ''}</div>
+          <div class="row"><span>{nodeInfo.executing ? 'Δv left' : 'Δv'}</span><b>{nodeInfo.dv.toFixed(0)} m/s</b></div>
           <div class="row"><span>Prograde</span><b>{nodeInfo.pro >= 0 ? '+' : ''}{nodeInfo.pro.toFixed(0)}</b></div>
           <div class="row"><span>Radial</span><b>{nodeInfo.rad >= 0 ? '+' : ''}{nodeInfo.rad.toFixed(0)}</b></div>
           <div class="row"><span>T−</span><b>{nodeInfo.tMinus > 0 ? fmt(nodeInfo.tMinus, 's') : 'now'}</b></div>
           <div class="row"><span>→ Apo</span><b>{nodeInfo.apoAlt === Infinity ? '— (escape)' : km(nodeInfo.apoAlt)}</b></div>
           <div class="row"><span>→ Peri</span><b>{km(nodeInfo.periAlt)}</b></div>
-          <div class="node-keys">[I/K] pro · [J/L] rad · [U/O] time · [Y] warp-to · [B] burn · [N] clear · ⇧=×10</div>
+          <div class="node-keys">[I/K] pro · [J/L] rad · [U/O] time · <b>[B] {nodeInfo.armed ? 'disarm' : 'arm → auto-burn'}</b> · [N] clear · ⇧=×10</div>
         </div>
       {/if}
 
@@ -514,7 +529,15 @@
   .mc.on { background: #2ecc71; color: #05060a; }
   .zoom { min-width: 44px; text-align: center; font-size: 13px; color: #9aa0a6; font-variant-numeric: tabular-nums; }
   .mc-hint { color: #6a707a; font-size: 11px; margin-left: 6px; }
+  .row.tgt { color: #c39bd3; }
+  .row.tgt b { color: #d2b4de; }
+  .sas { top: 252px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 188px; padding: 8px 10px; }
+  .sas-title { width: 100%; color: #7fb0ff; font-size: 11px; letter-spacing: 1.5px; margin-bottom: 2px; }
+  .sasb { width: auto; padding: 4px 8px; background: #161c28; color: #aeb4bc; font-size: 12px; font-weight: 600; }
+  .sasb.on { background: #f1c40f; color: #05060a; }
+  .sasb.tgt.on { background: #c39bd3; }
   .node { bottom: 70px; left: 50%; transform: translateX(-50%); min-width: 220px; }
+  .node.armed { border-color: #f1c40f; box-shadow: 0 0 18px rgba(241,196,15,0.25); }
   .node-title { color: #f1c40f; font-weight: 700; font-size: 12px; letter-spacing: 1px; margin-bottom: 6px; }
   .node-keys { margin-top: 6px; color: #6a707a; font-size: 11px; }
   .board { position: absolute; top: 190px; right: 14px; width: 188px; padding: 10px 12px; z-index: 5; }

@@ -19,14 +19,15 @@ import {
 import { osculating, currentBodyId } from '../shared/autopilot.ts'
 import { apsides, stateToElements } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
-import { type ManeuverNode, applyNode, nodeDeltaV } from '../shared/maneuver.ts'
-import { TAU } from '../shared/units.ts'
-import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len } from '../shared/units.ts'
+import { type ManeuverNode, applyNode, nodeDeltaV, nodeBurnDir } from '../shared/maneuver.ts'
+import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len, wrapAngle, TAU } from '../shared/units.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
 import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
 import type { MilestoneKind } from '../shared/milestones.ts'
 
 export type FlightPhase = 'prelaunch' | 'ascent' | 'coast' | 'circularize'
+export type HoldMode = 'off' | 'prograde' | 'retrograde' | 'radial-out' | 'radial-in' | 'target' | 'anti-target' | 'node'
+export interface TargetRef { kind: 'vessel' | 'body'; id: string; name: string }
 
 export interface Readout {
   altitude: number
@@ -46,10 +47,23 @@ export interface Readout {
   heading: number
   bodyName: string
   landed: boolean
+  hold: HoldMode
+  nodeArmed: boolean
+  burning: boolean
+  targetName: string | null
+  targetDist: number | null
+  targetRelSpeed: number | null
 }
 
 const ROOT_BODY = SYSTEM[ROOT]
 const ATMO = ROOT_BODY.atmosphere?.height ?? 0
+const HOLD_RATE = 2.5 // rad/s heading slew under SAS / node hold
+
+/** Rotate `cur` toward `target` by at most `maxStep` radians. */
+function slew(cur: number, target: number, maxStep: number): number {
+  const d = wrapAngle(target - cur)
+  return Math.abs(d) <= maxStep ? target : cur + Math.sign(d) * maxStep
+}
 
 export class Game {
   world: FlightWorld = { root: ROOT, system: SYSTEM }
@@ -68,9 +82,13 @@ export class Game {
   private milestoneFired = new Set<MilestoneKind>()
   private wasInSpace = false
   node: ManeuverNode | null = null
+  private nodeArmed = false
   private executingNode = false
   private nodeRemaining = 0
-  private warpingToNode = false
+  hold: HoldMode = 'off'
+  target: TargetRef | null = null
+  targetPos: Vec2 | null = null // world pos of the target, set by the App each frame
+  targetVel: Vec2 | null = null
   send: (m: ClientMsg) => void = () => {}
   onMilestone: (kind: MilestoneKind) => void = () => {}
 
@@ -86,8 +104,12 @@ export class Game {
     this.milestoneFired.clear()
     this.wasInSpace = false
     this.node = null
+    this.nodeArmed = false
     this.executingNode = false
-    this.warpingToNode = false
+    this.hold = 'off'
+    this.target = null
+    this.targetPos = null
+    this.targetVel = null
   }
 
   stageNow(): void {
@@ -98,12 +120,44 @@ export class Game {
     if (this.autopilot) this.apPhase = 'ascent'
   }
 
+  // --- SAS heading hold ---------------------------------------------------
+  setHold(m: HoldMode): void {
+    this.hold = this.hold === m ? 'off' : m
+    if (this.hold !== 'off') {
+      this.autopilot = false
+      this.nodeArmed = false
+      this.executingNode = false
+    }
+  }
+  private holdHeading(): number | null {
+    const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
+    switch (this.hold) {
+      case 'prograde': return len(rf.relVel) > 0.5 ? angleOf(rf.relVel) : null
+      case 'retrograde': return len(rf.relVel) > 0.5 ? angleOf(scale(rf.relVel, -1)) : null
+      case 'radial-out': return angleOf(rf.relPos)
+      case 'radial-in': return angleOf(scale(rf.relPos, -1))
+      case 'target': return this.targetPos ? angleOf(sub(this.targetPos, this.st.pos)) : null
+      case 'anti-target': return this.targetPos ? angleOf(sub(this.st.pos, this.targetPos)) : null
+      case 'node': return this.node ? angleOf(nodeBurnDir(this.elements(), this.node)) : null
+      default: return null
+    }
+  }
+
+  // --- targeting ----------------------------------------------------------
+  setTarget(t: TargetRef | null): void {
+    this.target = t
+    this.targetPos = null
+    this.targetVel = null
+    if (!t && (this.hold === 'target' || this.hold === 'anti-target')) this.hold = 'off'
+  }
+
   // --- maneuver nodes -----------------------------------------------------
   toggleNode(): void {
     if (this.node) {
       this.node = null
+      this.nodeArmed = false
       this.executingNode = false
-      this.warpingToNode = false
+      if (this.hold === 'node') this.hold = 'off'
       return
     }
     // Place the node at the next apoapsis (the natural circularization point).
@@ -115,29 +169,44 @@ export class Game {
     this.node = { t: this.st.t + dt, prograde: 0, radial: 0 }
   }
   adjustNode(dPrograde: number, dRadial: number): void {
-    if (this.node) {
+    if (this.node && !this.executingNode) {
       this.node.prograde += dPrograde
       this.node.radial += dRadial
     }
   }
   moveNode(dt: number): void {
-    if (this.node) this.node.t = Math.max(this.st.t + 1, this.node.t + dt)
+    if (this.node && !this.executingNode) this.node.t = Math.max(this.st.t + 1, this.node.t + dt)
   }
-  executeNode(): void {
+  /** Arm/disarm the node: warps to it and auto-burns, centred on the node time. */
+  armNode(): void {
     if (!this.node) return
-    this.executingNode = true
-    this.warpingToNode = false
+    if (this.nodeArmed) {
+      this.disarmNode()
+      return
+    }
+    this.nodeArmed = true
+    this.executingNode = false
     this.autopilot = false
-    this.warp = 1
+    this.hold = 'off'
     this.nodeRemaining = nodeDeltaV(this.node)
   }
-  toggleWarpToNode(): void {
-    if (this.node) this.warpingToNode = !this.warpingToNode
+  private disarmNode(): void {
+    this.nodeArmed = false
+    this.executingNode = false
+    this.throttle = 0
+    this.warp = 1
+  }
+  private completeNode(): void {
+    this.nodeArmed = false
+    this.executingNode = false
+    this.throttle = 0
+    this.node = null
+    if (this.hold === 'node') this.hold = 'off'
   }
   plannedElements(): Elements | null {
     return this.node ? applyNode(this.elements(), this.node) : null
   }
-  nodeReadout(): { pro: number; rad: number; dv: number; tMinus: number; apoAlt: number; periAlt: number; executing: boolean } | null {
+  nodeReadout(): { pro: number; rad: number; dv: number; tMinus: number; apoAlt: number; periAlt: number; armed: boolean; executing: boolean } | null {
     if (!this.node) return null
     const planned = this.plannedElements()!
     const body = SYSTEM[currentBodyId(this.world, this.st)]
@@ -145,10 +214,11 @@ export class Game {
     return {
       pro: this.node.prograde,
       rad: this.node.radial,
-      dv: nodeDeltaV(this.node),
+      dv: this.nodeArmed ? this.nodeRemaining : nodeDeltaV(this.node),
       tMinus: this.node.t - this.st.t,
       apoAlt: (planned.e < 1 ? apoapsis : Infinity) - body.radius,
       periAlt: periapsis - body.radius,
+      armed: this.nodeArmed,
       executing: this.executingNode,
     }
   }
@@ -172,23 +242,33 @@ export class Game {
     const vSpeed = dot(this.st.vel, up)
 
     // --- guidance -----------------------------------------------------------
-    if (this.executingNode && this.node) {
-      // Burn in the planned direction (prograde/radial mix), counting down Δv.
+    if (this.nodeArmed && this.node) {
+      // Arm -> point at the burn -> warp to the node -> auto-burn CENTRED on it,
+      // tapering the throttle to a clean stop. The burn only starts inside the
+      // window around the node, so arming early never over-burns the plan.
       const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
-      const dir = norm(add(scale(norm(rf.relVel), this.node.prograde), scale(norm(rf.relPos), this.node.radial)))
-      this.st.heading = angleOf(dir)
-      this.throttle = 1
+      const burnDir = norm(add(scale(norm(rf.relVel), this.node.prograde), scale(norm(rf.relPos), this.node.radial)))
+      const desired = angleOf(burnDir)
+      this.st.heading = slew(this.st.heading, desired, HOLD_RATE * dt)
       const stage = this.stages[this.st.stageIndex]
       const mass = currentMass(this.stages, this.st)
-      if (stage && this.st.fuel > 1e-6 && mass > 0) this.nodeRemaining -= (stage.thrust / mass) * dt
-      if (this.st.fuel <= 1e-6 && this.st.stageIndex < this.stages.length - 1) this.stageReq = true
-      if (this.nodeRemaining <= 0) {
-        this.executingNode = false
+      const accel = stage && this.st.fuel > 1e-6 && mass > 0 ? stage.thrust / mass : 0
+      const burnTimeFull = accel > 0 ? nodeDeltaV(this.node) / accel : 1e9
+      const tToNode = this.node.t - this.st.t
+      const lead = Math.min(burnTimeFull / 2 + 1, 1e9)
+      const aligned = Math.abs(wrapAngle(this.st.heading - desired)) < 0.08
+      if (!this.executingNode) {
         this.throttle = 0
-        this.node = null
-      } else if (this.st.fuel <= 1e-6 && this.st.stageIndex >= this.stages.length - 1) {
-        this.executingNode = false
-        this.throttle = 0
+        this.warp = tToNode > lead + 3 ? (tToNode > 600 ? 1000 : tToNode > 60 ? 100 : 10) : 1
+        if (tToNode <= lead && aligned) this.executingNode = true
+      }
+      if (this.executingNode) {
+        this.warp = 1
+        this.throttle = Math.max(0.04, Math.min(1, this.nodeRemaining / 15)) // taper near Δv=0
+        if (accel > 0) this.nodeRemaining -= accel * this.throttle * dt
+        if (this.st.fuel <= 1e-6 && this.st.stageIndex < this.stages.length - 1) this.stageReq = true
+        if (this.nodeRemaining <= 0.05) this.completeNode()
+        else if (this.st.fuel <= 1e-6 && this.st.stageIndex >= this.stages.length - 1) this.disarmNode()
       }
     } else if (this.autopilot) {
       const apoReady = el.e < 1 && apoapsis >= targetR
@@ -211,19 +291,17 @@ export class Game {
         }
       }
     } else if (this.rotateInput !== 0) {
+      this.hold = 'off'
       this.st.heading += this.rotateInput * 1.8 * dt
+    } else if (this.hold !== 'off') {
+      const d = this.holdHeading()
+      if (d !== null) this.st.heading = slew(this.st.heading, d, HOLD_RATE * dt)
     }
 
-    // Warp-to-node: ramp the time-warp down as the node approaches.
-    if (this.warpingToNode && this.node && this.throttle === 0) {
-      const dtToNode = this.node.t - this.st.t
-      if (dtToNode <= 2) {
-        this.warpingToNode = false
-        this.warp = 1
-      } else {
-        this.warp = dtToNode > 600 ? 1000 : dtToNode > 60 ? 100 : 10
-      }
-    }
+    // Auto-stage whenever we're commanding thrust on a dry tank (autopilot
+    // ascent, node burns, or a held throttle) — drop the spent stage so the
+    // next engine lights instead of stranding.
+    if (this.throttle > 0 && this.st.fuel <= 1e-6 && this.st.stageIndex < this.stages.length - 1) this.stageReq = true
 
     // Throttle forces warp back to 1 — you cannot warp under power.
     const coasting = this.throttle === 0 && alt > ATMO
@@ -327,6 +405,12 @@ export class Game {
       heading: this.st.heading,
       bodyName: body.name,
       landed: this.st.landed,
+      hold: this.hold,
+      nodeArmed: this.nodeArmed,
+      burning: this.executingNode,
+      targetName: this.target?.name ?? null,
+      targetDist: this.targetPos ? len(sub(this.targetPos, this.st.pos)) : null,
+      targetRelSpeed: this.targetPos && this.targetVel ? len(sub(this.st.vel, this.targetVel)) : null,
     }
   }
 

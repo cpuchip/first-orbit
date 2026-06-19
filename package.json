@@ -9,6 +9,7 @@
     "build": "vite build",
     "serve": "tsx server/index.ts",
     "smoke": "tsx shared/sim/smoke.ts",
+    "burntest": "tsx src/sim-burn.ts",
     "wstest": "tsx server/wstest.ts",
     "compile": "tsc --noEmit",
     "test": "vitest run",
