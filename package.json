@@ -1,0 +1,31 @@
+{
+  "name": "first-orbit",
+  "version": "0.1.0",
+  "description": "First Orbit — a 2D browser multiplayer rocketry game in the Hubble Frontier origin era.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "vite build",
+    "serve": "tsx server/index.ts",
+    "smoke": "tsx shared/sim/smoke.ts",
+    "wstest": "tsx server/wstest.ts",
+    "compile": "tsc --noEmit",
+    "test": "vitest run",
+    "gen-assets": "tsx scripts/gen-assets/generate.ts"
+  },
+  "dependencies": {
+    "nanoid": "^5",
+    "svelte": "^5",
+    "ws": "^8"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "@types/node": "^22",
+    "@types/ws": "^8",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vite": "^8",
+    "vitest": "^3"
+  }
+}

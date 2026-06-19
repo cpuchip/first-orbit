@@ -1,0 +1,26 @@
+# First Orbit — multiplayer.
+# Local:  docker compose up --build   ->  http://localhost:8080 (open two tabs)
+# Deploy: Dokploy builds this compose; map orbit.cpuchip.net to `game` on 8080.
+
+services:
+  game:
+    build: .
+    container_name: first-orbit
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - STATE_DIR=/data
+    volumes:
+      # persists the shared space program across redeploys/restarts
+      - first-orbit-state:/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  first-orbit-state:

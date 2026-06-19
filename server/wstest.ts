@@ -1,0 +1,98 @@
+// Over-the-wire multiplayer oracle — `npm run wstest`.
+//
+// Boots the real server on a scratch port and drives it with a real WebSocket
+// client: handshake, launch, snapshot propagation, orbit settle, chat. Exit 0 =
+// the network path works end to end; exit 1 = it broke. This is the MP twin of
+// the smoke oracle and the gate for any netcode change.
+
+import os from 'node:os'
+import path from 'node:path'
+import fs from 'node:fs'
+import { WebSocket } from 'ws'
+import { encode, decode, PROTOCOL_VERSION, type ClientMsg, type ServerMsg } from '../shared/netproto.ts'
+import { stateToElements, circularSpeed } from '../shared/orbit.ts'
+import { SYSTEM, ROOT } from '../shared/bodies.ts'
+
+const PORT = 8099
+process.env.PORT = String(PORT)
+process.env.STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'fo-wstest-'))
+
+let passed = 0
+const failures: string[] = []
+const check = (name: string, cond: boolean, detail = '') => {
+  if (cond) { passed++; console.log(`  ok  ${name}`) }
+  else { failures.push(`${name}${detail ? ` — ${detail}` : ''}`); console.log(`FAIL  ${name}${detail ? ` — ${detail}` : ''}`) }
+}
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+function connect(): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`)
+    ws.on('open', () => resolve(ws))
+    ws.on('error', reject)
+  })
+}
+function nextOfType<T extends ServerMsg['type']>(ws: WebSocket, type: T, timeout = 2000): Promise<Extract<ServerMsg, { type: T }>> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout waiting for ${type}`)), timeout)
+    const onMsg = (raw: WebSocket.RawData) => {
+      const m = decode<ServerMsg>(raw.toString())
+      if (m.type === type) {
+        clearTimeout(timer)
+        ws.off('message', onMsg)
+        resolve(m as Extract<ServerMsg, { type: T }>)
+      }
+    }
+    ws.on('message', onMsg)
+  })
+}
+const send = (ws: WebSocket, m: ClientMsg) => ws.send(encode(m))
+
+async function main() {
+  await import('./index.ts') // boots the server (listens on PORT)
+  await wait(300)
+
+  console.log('First Orbit — wstest\n')
+
+  const a = await connect()
+  send(a, { type: 'hello', name: 'Ada', protocol: PROTOCOL_VERSION })
+  const welcome = await nextOfType(a, 'welcome')
+  check('handshake -> welcome', !!welcome.you.id && welcome.players.length >= 1, `player=${welcome.you.name}`)
+  check('welcome carries funds', welcome.you.funds > 0, `funds=${welcome.you.funds}`)
+
+  send(a, { type: 'launch', vesselName: 'Pathfinder I', bodyId: ROOT })
+  const created = await nextOfType(a, 'vesselCreated')
+  check('launch -> vesselCreated', created.vessel.ownerName === 'Ada', `name=${created.vessel.name}`)
+  const vid = created.vessel.id
+
+  const snap = await nextOfType(a, 'snapshot')
+  check('snapshot includes the vessel', snap.vessels.some((v) => v.id === vid), `vessels=${snap.vessels.length}`)
+
+  // Settle onto a circular Terra orbit and confirm the status propagates.
+  const r = SYSTEM[ROOT].radius + 90_000
+  const orbit = stateToElements({ x: r, y: 0 }, { y: circularSpeed(SYSTEM[ROOT].mu, r), x: 0 }, SYSTEM[ROOT].mu, welcome.universeTime)
+  send(a, { type: 'settle', vesselId: vid, orbit, status: 'orbit' })
+  await wait(250)
+  const snap2 = await nextOfType(a, 'snapshot')
+  const mine = snap2.vessels.find((v) => v.id === vid)
+  check('vessel settles into orbit', mine?.status === 'orbit' && !!mine?.orbit, `status=${mine?.status}`)
+
+  // A second player sees the first player's vessel (shared program).
+  const b = await connect()
+  send(b, { type: 'hello', name: 'Boyd', protocol: PROTOCOL_VERSION })
+  const welcomeB = await nextOfType(b, 'welcome')
+  check('second player sees shared vessel', welcomeB.vessels.some((v) => v.id === vid), `vessels=${welcomeB.vessels.length}`)
+
+  // Chat broadcast reaches the other client.
+  send(a, { type: 'chat', text: 'liftoff in 3...' })
+  const chat = await nextOfType(b, 'chat')
+  check('chat broadcast', chat.from === 'Ada' && chat.text.includes('liftoff'), `text=${chat.text}`)
+
+  a.close(); b.close()
+  console.log(`\n${passed} passed, ${failures.length} failed`)
+  if (failures.length) { for (const f of failures) console.log(`  - ${f}`); process.exit(1) }
+  console.log('wstest green ✓')
+  process.exit(0)
+}
+
+main().catch((e) => { console.error(e); process.exit(1) })

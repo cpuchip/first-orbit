@@ -1,0 +1,17 @@
+{
+  "outDir": "public/assets",
+  "assets": [
+    { "name": "logo", "prompt": "An emblem/wordmark badge for a space program called FIRST ORBIT: a thin circular orbit line around a small blue world, a single rocket arcing up off the surface. Minimal, embroidered-patch feel, dark background." },
+    { "name": "terra", "prompt": "A small Earth-like home planet as a top-down circular disk: blue oceans, scattered green-brown landmasses, thin white cloud bands, a soft day/night terminator on the right edge. Game map planet token." },
+    { "name": "luna", "prompt": "A small airless grey moon as a top-down circular disk: cratered regolith, subtle maria, soft terminator. Game map moon token." },
+    { "name": "part-cmd-pod", "prompt": "A one-person reentry command capsule, side view, nose up: blunt cone, heat-shield base, a single round window, brushed-metal hull. 2D game part icon, transparent background." },
+    { "name": "part-tank", "prompt": "A cylindrical rocket propellant tank, side view, vertical: off-white hull with panel lines and frost rings, mounting collars top and bottom. 2D game part icon, transparent background." },
+    { "name": "part-engine-main", "prompt": "A heavy first-stage rocket engine, side view, nozzle pointing down: a large bell nozzle, turbopump plumbing, slate-grey metal. 2D game part icon, transparent background." },
+    { "name": "part-engine-vac", "prompt": "A small efficient vacuum rocket engine, side view, nozzle down: a long thin extended nozzle bell, light plumbing. 2D game part icon, transparent background." },
+    { "name": "part-decoupler", "prompt": "A rocket stage decoupler ring, side view: a short cylindrical band with explosive-bolt detail between two mounting collars. 2D game part icon, transparent background." },
+    { "name": "part-fin", "prompt": "A single aerodynamic rocket fin, side view: a swept triangular control surface in grey metal with a small actuator. 2D game part icon, transparent background." },
+    { "name": "part-parachute", "prompt": "A capsule parachute pack, side view: a compact canister with a folded deep-red canopy hint. 2D game part icon, transparent background." },
+    { "name": "part-leg", "prompt": "A spacecraft landing leg, side view, deployed: a strut with a round footpad and shock damper, grey metal. 2D game part icon, transparent background." },
+    { "name": "launchpad", "prompt": "A simple rocket launch pad and gantry tower at dawn, side view: concrete pad, steel service tower, exhaust flame trench. Muted industrial palette, grounded near-future. Game background element." }
+  ]
+}

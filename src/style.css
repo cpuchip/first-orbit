@@ -1,0 +1,4 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #05060a; color: #e8eaed; }
+body { font-family: system-ui, -apple-system, sans-serif; overscroll-behavior: none; }
+#app { height: 100%; }
