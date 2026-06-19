@@ -239,7 +239,7 @@
     if (k === 'e') game.setHold('retrograde')
     if (k === 't' && game.target) game.setHold('target')
     // maneuver node editing
-    if (k === 'n') game.toggleNode()
+    if (k === 'n') e.shiftKey ? game.addNode() : game.toggleNode()
     if (game.node) {
       const dv = e.shiftKey ? 100 : 10
       const ts = e.shiftKey ? 300 : 30
@@ -250,6 +250,9 @@
       if (k === 'o') game.moveNode(ts)
       if (k === 'u') game.moveNode(-ts)
       if (k === 'b') game.armNode()
+      if (k === '[') game.cycleNode(-1)
+      if (k === ']') game.cycleNode(1)
+      if (k === 'backspace' || k === 'delete') { e.preventDefault(); game.removeActiveNode() }
     }
   }
   function onKeyUp(e: KeyboardEvent) {
@@ -485,14 +488,14 @@
 
       {#if nodeInfo}
         <div class="node panel" class:armed={nodeInfo.armed}>
-          <div class="node-title">⬗ MANEUVER {nodeInfo.executing ? '· 🔥 BURNING' : nodeInfo.armed ? '· ARMED ▸ warping/burning' : ''}</div>
+          <div class="node-title">⬗ MANEUVER {nodeInfo.count > 1 ? `${nodeInfo.index + 1}/${nodeInfo.count}` : ''} {nodeInfo.executing ? '· 🔥 BURNING' : nodeInfo.armed ? '· ARMED ▸' : ''}</div>
           <div class="row"><span>{nodeInfo.executing ? 'Δv left' : 'Δv'}</span><b>{nodeInfo.dv.toFixed(0)} m/s</b></div>
           <div class="row"><span>Prograde</span><b>{nodeInfo.pro >= 0 ? '+' : ''}{nodeInfo.pro.toFixed(0)}</b></div>
           <div class="row"><span>Radial</span><b>{nodeInfo.rad >= 0 ? '+' : ''}{nodeInfo.rad.toFixed(0)}</b></div>
           <div class="row"><span>T−</span><b>{nodeInfo.tMinus > 0 ? fmt(nodeInfo.tMinus, 's') : 'now'}</b></div>
           <div class="row"><span>→ Apo</span><b>{nodeInfo.apoAlt === Infinity ? '— (escape)' : km(nodeInfo.apoAlt)}</b></div>
           <div class="row"><span>→ Peri</span><b>{km(nodeInfo.periAlt)}</b></div>
-          <div class="node-keys">[I/K] pro · [J/L] rad · [U/O] time · <b>[B] {nodeInfo.armed ? 'disarm' : 'arm → auto-burn'}</b> · [N] clear · ⇧=×10</div>
+          <div class="node-keys">[I/K] pro · [J/L] rad · [U/O] time · <b>[B] {nodeInfo.armed ? 'disarm' : 'arm → auto-burn'}</b> · ⇧N add · [/] cycle · Del remove · [N] clear</div>
         </div>
       {/if}
 

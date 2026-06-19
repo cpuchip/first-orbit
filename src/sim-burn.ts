@@ -62,6 +62,28 @@ console.log('First Orbit — burn oracle\n')
   )
 }
 
+// --- two chained nodes execute in sequence onto the predicted final orbit -------
+{
+  const g = new Game()
+  g.launch(referenceRocket(), 'test2')
+  if (!reachOrbit(g)) {
+    check('chained: reached orbit', false, 'autopilot failed')
+  } else {
+    g.toggleNode() // node 0 at apoapsis
+    g.adjustNode(20, 0)
+    g.addNode() // node 1 at the next apoapsis of the post-burn orbit
+    g.adjustNode(20, 0)
+    check('two nodes queued', g.nodes.length === 2)
+    const chain = g.plannedChain()
+    const finalA = chain[chain.length - 1].a
+    g.armNode()
+    for (let i = 0; i < 800_000 && g.nodes.length; i++) g.update(0.1)
+    check('queue executed (both nodes consumed)', g.nodes.length === 0)
+    const afterA = g.elements().a
+    check('chained burns reach the predicted orbit', rel(afterA, finalA) < 0.03, `a ${(afterA / 1e3).toFixed(0)}k vs ${(finalA / 1e3).toFixed(0)}k`)
+  }
+}
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.log(`  - ${f}`); process.exit(1) }
 console.log('burn oracle green ✓')

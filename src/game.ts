@@ -81,7 +81,15 @@ export class Game {
   private netAccum = 0
   private milestoneFired = new Set<MilestoneKind>()
   private wasInSpace = false
-  node: ManeuverNode | null = null
+  nodes: ManeuverNode[] = []
+  private editIdx = 0
+  /** The node currently being edited / shown (nodes are fired chronologically from index 0). */
+  get node(): ManeuverNode | null {
+    return this.nodes[this.editIdx] ?? null
+  }
+  get activeNodeIdx(): number {
+    return this.editIdx
+  }
   private nodeArmed = false
   private executingNode = false
   private nodeRemaining = 0
@@ -103,7 +111,8 @@ export class Game {
     this.settled = false
     this.milestoneFired.clear()
     this.wasInSpace = false
-    this.node = null
+    this.nodes = []
+    this.editIdx = 0
     this.nodeArmed = false
     this.executingNode = false
     this.hold = 'off'
@@ -138,7 +147,7 @@ export class Game {
       case 'radial-in': return angleOf(scale(rf.relPos, -1))
       case 'target': return this.targetPos ? angleOf(sub(this.targetPos, this.st.pos)) : null
       case 'anti-target': return this.targetPos ? angleOf(sub(this.st.pos, this.targetPos)) : null
-      case 'node': return this.node ? angleOf(nodeBurnDir(this.elements(), this.node)) : null
+      case 'node': return this.nodes[0] ? angleOf(nodeBurnDir(this.elements(), this.nodes[0])) : null
       default: return null
     }
   }
@@ -151,35 +160,64 @@ export class Game {
     if (!t && (this.hold === 'target' || this.hold === 'anti-target')) this.hold = 'off'
   }
 
-  // --- maneuver nodes -----------------------------------------------------
+  // --- maneuver nodes (a chronological queue) -----------------------------
+  /** The planned orbit after each node, chaining from the live orbit. */
+  plannedChain(): Elements[] {
+    const out: Elements[] = []
+    let base = this.elements()
+    for (const n of this.nodes) {
+      base = applyNode(base, n)
+      out.push(base)
+    }
+    return out
+  }
+  /** Append a node at the next apoapsis of the last planned orbit (or the live one). */
+  addNode(): void {
+    const chain = this.plannedChain()
+    const base = chain.length ? chain[chain.length - 1] : this.elements()
+    const afterT = this.nodes.length ? this.nodes[this.nodes.length - 1].t : this.st.t
+    const absA = Math.abs(base.a)
+    const n = Math.sqrt(base.mu / (absA * absA * absA))
+    let dt = 120
+    if (base.e < 1) dt = ((((Math.PI - base.M0) % TAU) + TAU) % TAU) / n
+    this.nodes.push({ t: Math.max(base.t0 + dt, afterT + 1), prograde: 0, radial: 0 })
+    this.editIdx = this.nodes.length - 1
+  }
+  /** N key: create the first node, or clear the whole queue if any exist. */
   toggleNode(): void {
-    if (this.node) {
-      this.node = null
+    if (this.nodes.length) {
+      this.nodes = []
+      this.editIdx = 0
       this.nodeArmed = false
       this.executingNode = false
       if (this.hold === 'node') this.hold = 'off'
-      return
+    } else {
+      this.addNode()
     }
-    // Place the node at the next apoapsis (the natural circularization point).
-    const el = this.elements()
-    const absA = Math.abs(el.a)
-    const n = Math.sqrt(el.mu / (absA * absA * absA))
-    let dt = 120
-    if (el.e < 1) dt = ((((Math.PI - el.M0) % TAU) + TAU) % TAU) / n
-    this.node = { t: this.st.t + dt, prograde: 0, radial: 0 }
+  }
+  removeActiveNode(): void {
+    if (!this.nodes.length) return
+    this.nodes.splice(this.editIdx, 1)
+    this.editIdx = Math.max(0, Math.min(this.editIdx, this.nodes.length - 1))
+    if (!this.nodes.length) this.nodeArmed = false
+  }
+  cycleNode(dir: number): void {
+    if (this.nodes.length) this.editIdx = (this.editIdx + dir + this.nodes.length) % this.nodes.length
   }
   adjustNode(dPrograde: number, dRadial: number): void {
-    if (this.node && !this.executingNode) {
-      this.node.prograde += dPrograde
-      this.node.radial += dRadial
+    const n = this.node
+    if (n && !this.executingNode) {
+      n.prograde += dPrograde
+      n.radial += dRadial
     }
   }
   moveNode(dt: number): void {
-    if (this.node && !this.executingNode) this.node.t = Math.max(this.st.t + 1, this.node.t + dt)
+    const n = this.node
+    if (n && !this.executingNode) n.t = Math.max(this.st.t + 1, n.t + dt)
   }
-  /** Arm/disarm the node: warps to it and auto-burns, centred on the node time. */
+  /** Arm/disarm the queue: warps to each node in turn and auto-burns it, centred. */
   armNode(): void {
-    if (!this.node) return
+    if (!this.nodes.length) return
     if (this.nodeArmed) {
       this.disarmNode()
       return
@@ -188,7 +226,7 @@ export class Game {
     this.executingNode = false
     this.autopilot = false
     this.hold = 'off'
-    this.nodeRemaining = nodeDeltaV(this.node)
+    this.nodeRemaining = nodeDeltaV(this.nodes[0])
   }
   private disarmNode(): void {
     this.nodeArmed = false
@@ -197,29 +235,38 @@ export class Game {
     this.warp = 1
   }
   private completeNode(): void {
-    this.nodeArmed = false
     this.executingNode = false
     this.throttle = 0
-    this.node = null
-    if (this.hold === 'node') this.hold = 'off'
+    this.nodes.shift() // drop the burned node; the next becomes nodes[0]
+    this.editIdx = Math.max(0, Math.min(this.editIdx, this.nodes.length - 1))
+    if (this.nodes.length) {
+      this.nodeRemaining = nodeDeltaV(this.nodes[0]) // keep armed for the next node
+    } else {
+      this.nodeArmed = false
+      if (this.hold === 'node') this.hold = 'off'
+    }
   }
   plannedElements(): Elements | null {
-    return this.node ? applyNode(this.elements(), this.node) : null
+    const chain = this.plannedChain()
+    return chain[this.editIdx] ?? null
   }
-  nodeReadout(): { pro: number; rad: number; dv: number; tMinus: number; apoAlt: number; periAlt: number; armed: boolean; executing: boolean } | null {
-    if (!this.node) return null
+  nodeReadout(): { pro: number; rad: number; dv: number; tMinus: number; apoAlt: number; periAlt: number; armed: boolean; executing: boolean; index: number; count: number } | null {
+    const n = this.node
+    if (!n) return null
     const planned = this.plannedElements()!
     const body = SYSTEM[currentBodyId(this.world, this.st)]
     const { apoapsis, periapsis } = apsides(planned)
     return {
-      pro: this.node.prograde,
-      rad: this.node.radial,
-      dv: this.nodeArmed ? this.nodeRemaining : nodeDeltaV(this.node),
-      tMinus: this.node.t - this.st.t,
+      pro: n.prograde,
+      rad: n.radial,
+      dv: this.nodeArmed && this.editIdx === 0 ? this.nodeRemaining : nodeDeltaV(n),
+      tMinus: n.t - this.st.t,
       apoAlt: (planned.e < 1 ? apoapsis : Infinity) - body.radius,
       periAlt: periapsis - body.radius,
       armed: this.nodeArmed,
       executing: this.executingNode,
+      index: this.editIdx,
+      count: this.nodes.length,
     }
   }
 
@@ -242,19 +289,20 @@ export class Game {
     const vSpeed = dot(this.st.vel, up)
 
     // --- guidance -----------------------------------------------------------
-    if (this.nodeArmed && this.node) {
+    const burnNode = this.nodes[0]
+    if (this.nodeArmed && burnNode) {
       // Arm -> point at the burn -> warp to the node -> auto-burn CENTRED on it,
       // tapering the throttle to a clean stop. The burn only starts inside the
       // window around the node, so arming early never over-burns the plan.
       const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
-      const burnDir = norm(add(scale(norm(rf.relVel), this.node.prograde), scale(norm(rf.relPos), this.node.radial)))
+      const burnDir = norm(add(scale(norm(rf.relVel), burnNode.prograde), scale(norm(rf.relPos), burnNode.radial)))
       const desired = angleOf(burnDir)
       this.st.heading = slew(this.st.heading, desired, HOLD_RATE * dt)
       const stage = this.stages[this.st.stageIndex]
       const mass = currentMass(this.stages, this.st)
       const accel = stage && this.st.fuel > 1e-6 && mass > 0 ? stage.thrust / mass : 0
-      const burnTimeFull = accel > 0 ? nodeDeltaV(this.node) / accel : 1e9
-      const tToNode = this.node.t - this.st.t
+      const burnTimeFull = accel > 0 ? nodeDeltaV(burnNode) / accel : 1e9
+      const tToNode = burnNode.t - this.st.t
       const lead = Math.min(burnTimeFull / 2 + 1, 1e9)
       const aligned = Math.abs(wrapAngle(this.st.heading - desired)) < 0.08
       if (!this.executingNode) {

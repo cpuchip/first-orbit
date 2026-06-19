@@ -291,34 +291,39 @@ export function drawMap(
     if (apoapsis < Infinity) label(ctx, toScreen(add(scale(fromAngle(el.argPe + Math.PI), apoapsis), pBodyPos)), 'Ap')
   }
 
-  // Maneuver node: the planned orbit (dashed gold) + the burn marker.
-  const planned = game.plannedElements()
-  if (game.node) {
+  // Maneuver nodes: each planned orbit in the chain (dashed gold) + a burn marker.
+  const chain = game.plannedChain()
+  for (let i = 0; i < game.nodes.length; i++) {
+    const planned = chain[i]
+    const activeI = i === game.activeNodeIdx
     if (planned && planned.e < 1) {
       const path = orbitPath(planned, 160)
       ctx.setLineDash([6, 5])
       ctx.beginPath()
-      path.forEach((p, i) => {
+      path.forEach((p, k) => {
         const sc = toScreen(add(p, pBodyPos))
-        if (i === 0) ctx.moveTo(sc.x, sc.y)
+        if (k === 0) ctx.moveTo(sc.x, sc.y)
         else ctx.lineTo(sc.x, sc.y)
       })
-      ctx.strokeStyle = 'rgba(241,196,15,0.85)'
-      ctx.lineWidth = 1.5
+      ctx.strokeStyle = activeI ? 'rgba(241,196,15,0.9)' : 'rgba(241,196,15,0.4)'
+      ctx.lineWidth = activeI ? 1.6 : 1.1
       ctx.stroke()
       ctx.setLineDash([])
     }
-    const ns = nodeState(el, game.node)
+    const baseOrbit = i === 0 ? el : chain[i - 1]
+    const ns = nodeState(baseOrbit, game.nodes[i])
     const nsc = toScreen(add(ns.pos, pBodyPos))
     ctx.fillStyle = '#f1c40f'
     ctx.beginPath()
-    ctx.arc(nsc.x, nsc.y, 5, 0, Math.PI * 2)
+    ctx.arc(nsc.x, nsc.y, activeI ? 5 : 4, 0, Math.PI * 2)
     ctx.fill()
-    ctx.strokeStyle = '#f1c40f'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.arc(nsc.x, nsc.y, 9, 0, Math.PI * 2)
-    ctx.stroke()
+    if (activeI) {
+      ctx.strokeStyle = '#f1c40f'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.arc(nsc.x, nsc.y, 9, 0, Math.PI * 2)
+      ctx.stroke()
+    }
   }
 
   // Other players' vessels (propagated by their analytic orbit / last flight snap).
