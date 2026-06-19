@@ -130,7 +130,7 @@ wss.on('connection', (ws) => {
       }
       case 'settle': {
         if (!client.playerId) return
-        program.settle(msg.vesselId, client.playerId, msg.orbit, msg.status)
+        program.settle(msg.vesselId, client.playerId, msg.orbit, msg.status, msg.bodyId)
         break
       }
       case 'recover': {

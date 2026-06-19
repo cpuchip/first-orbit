@@ -39,7 +39,7 @@ export type ClientMsg =
   | { type: 'hello'; name: string; protocol: number }
   | { type: 'launch'; vesselName: string; bodyId: string }
   | { type: 'flight'; vesselId: string; x: number; y: number; vx: number; vy: number; heading: number; t: number }
-  | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status'] }
+  | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string }
   | { type: 'recover'; vesselId: string }
   | { type: 'chat'; text: string }
   | { type: 'ping' }

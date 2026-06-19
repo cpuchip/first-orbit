@@ -6,8 +6,8 @@
 // the inverse hypothesis (Moroni 10:4 / Agans rule 9): a test that cannot fail
 // proves nothing, so we also confirm a deliberately weak rocket does NOT orbit.
 
-import { vec, len, sub } from '../units.ts'
-import { SYSTEM, ROOT, surfaceGravity } from '../bodies.ts'
+import { vec, len, sub, add } from '../units.ts'
+import { SYSTEM, ROOT, surfaceGravity, bodyPosition, bodyVelocity, dominantBody, referenceFrame } from '../bodies.ts'
 import {
   stateToElements,
   elementsToState,
@@ -140,6 +140,41 @@ console.log('First Orbit — smoke oracle\n')
   }
   const res = simulateToOrbit(world, weak, { targetAltitude: 85_000, dt: 0.1 })
   check('weak rocket fails to orbit (inverse)', !res.inOrbit, `phase=${res.phase}`)
+}
+
+// --- 8. Patched conics: Luna's sphere of influence ------------------------------
+{
+  const luna = SYSTEM['luna']
+  const lunaR = luna.orbitRadius!
+  // Body velocity: Luna's circular speed about Terra.
+  const lv = bodyVelocity(SYSTEM, 'luna', 0)
+  check('Luna orbital velocity', close(len(lv), circularSpeed(mu, lunaR), 1e-6), `|v|=${len(lv).toFixed(1)} m/s`)
+
+  // Dominant body: Terra in low orbit, Luna when near Luna.
+  const lowOrbit = vec(terra.radius + 100_000, 0)
+  const nearLuna = add(bodyPosition(SYSTEM, 'luna', 0), vec(luna.radius + 50_000, 0))
+  check('dominant body = Terra in low orbit', dominantBody(SYSTEM, ROOT, lowOrbit, 0) === 'terra')
+  check('dominant body = Luna near Luna', dominantBody(SYSTEM, ROOT, nearLuna, 0) === 'luna')
+
+  // SOI boundary is sharp: just outside -> Terra, just inside -> Luna.
+  const justOut = add(bodyPosition(SYSTEM, 'luna', 0), vec(luna.soi + 1_000, 0))
+  const justIn = add(bodyPosition(SYSTEM, 'luna', 0), vec(luna.soi - 1_000, 0))
+  check('SOI boundary sharp', dominantBody(SYSTEM, ROOT, justOut, 0) === 'terra' && dominantBody(SYSTEM, ROOT, justIn, 0) === 'luna')
+
+  // Frame continuity: relPos + Luna pos == absPos; relVel + Luna vel == absVel.
+  const rf = referenceFrame(SYSTEM, ROOT, nearLuna, vec(0, len(lv) + 100), 0)
+  const backPos = add(rf.relPos, bodyPosition(SYSTEM, 'luna', 0))
+  check('frame transform is continuous', rf.bodyId === 'luna' && len(sub(backPos, nearLuna)) < 1e-3)
+
+  // Capture: a vessel circular about Luna is a bound orbit in Luna's frame.
+  const r = luna.radius + 50_000
+  const vCircLuna = circularSpeed(luna.mu, r)
+  const absPos = add(bodyPosition(SYSTEM, 'luna', 0), vec(r, 0))
+  const absVel = add(bodyVelocity(SYSTEM, 'luna', 0), vec(0, vCircLuna))
+  const rf2 = referenceFrame(SYSTEM, ROOT, absPos, absVel, 0)
+  const elLuna = stateToElements(rf2.relPos, rf2.relVel, rf2.mu, 0)
+  const periAlt = apsides(elLuna).periapsis - luna.radius
+  check('low Luna orbit is bound & circular', elLuna.e < 0.01 && Math.abs(periAlt - 50_000) < 500, `e=${elLuna.e.toFixed(4)} periAlt=${(periAlt / 1000).toFixed(1)}km`)
 }
 
 // --- Summary --------------------------------------------------------------------

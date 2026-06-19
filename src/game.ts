@@ -5,7 +5,7 @@
 // the same two-regime split the server relies on. Streams active flight to the
 // server and "settles" the vessel onto an authoritative orbit when it stabilises.
 
-import { SYSTEM, ROOT, surfaceGravity } from '../shared/bodies.ts'
+import { SYSTEM, ROOT, surfaceGravity, referenceFrame, bodyVelocity, bodyPosition } from '../shared/bodies.ts'
 import {
   type FlightWorld,
   type FlightState,
@@ -16,11 +16,10 @@ import {
   altitude,
   currentMass,
 } from '../shared/physics.ts'
-import { osculating } from '../shared/autopilot.ts'
-import { apsides } from '../shared/orbit.ts'
+import { osculating, currentBodyId } from '../shared/autopilot.ts'
+import { apsides, stateToElements } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len } from '../shared/units.ts'
-import { bodyPosition } from '../shared/bodies.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
 import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
 
@@ -42,6 +41,8 @@ export interface Readout {
   warp: number
   inOrbit: boolean
   heading: number
+  bodyName: string
+  landed: boolean
 }
 
 const ROOT_BODY = SYSTEM[ROOT]
@@ -131,10 +132,16 @@ export class Game {
 
     // --- integrate ----------------------------------------------------------
     if (this.warp > 1 && coasting) {
-      const rootPos = bodyPosition(SYSTEM, ROOT, this.st.t)
-      const rel = propagate(sub(this.st.pos, rootPos), this.st.vel, ROOT_BODY.mu, this.st.t, dtReal * this.warp)
+      // On-rails warp in the current dominant body's frame (patched conics).
+      const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
       const t2 = this.st.t + dtReal * this.warp
-      this.st = { ...this.st, pos: add(rel.pos, bodyPosition(SYSTEM, ROOT, t2)), vel: rel.vel, t: t2 }
+      const rel = propagate(rf.relPos, rf.relVel, rf.mu, this.st.t, dtReal * this.warp)
+      this.st = {
+        ...this.st,
+        pos: add(rel.pos, bodyPosition(SYSTEM, rf.bodyId, t2)),
+        vel: add(rel.vel, bodyVelocity(SYSTEM, rf.bodyId, t2)),
+        t: t2,
+      }
     } else {
       const span = dt
       const n = Math.max(1, Math.ceil(span / 0.05))
@@ -151,11 +158,15 @@ export class Game {
 
     // --- server sync --------------------------------------------------------
     this.netAccum += dtReal
-    const stableOrbit = this.throttle === 0 && el.e < 1 && periapsis > ROOT_BODY.radius + ATMO
-    if (stableOrbit && !this.settled) {
-      this.send({ type: 'settle', vesselId: this.vesselId, orbit: el, status: 'orbit' })
+    const bodyId = currentBodyId(this.world, this.st)
+    const body = SYSTEM[bodyId]
+    const bodyAtmo = body.atmosphere?.height ?? 0
+    const stableOrbit = this.throttle === 0 && el.e < 1 && periapsis > body.radius + bodyAtmo
+    const settledStatus = this.st.landed ? 'landed' : stableOrbit ? 'orbit' : null
+    if (settledStatus && !this.settled) {
+      this.send({ type: 'settle', vesselId: this.vesselId, orbit: el, status: settledStatus, bodyId })
       this.settled = true
-    } else if (!stableOrbit && this.netAccum >= 1 / FLIGHT_HZ) {
+    } else if (!settledStatus && this.netAccum >= 1 / FLIGHT_HZ) {
       this.settled = false
       this.send({
         type: 'flight',
@@ -168,19 +179,27 @@ export class Game {
     }
   }
 
+  currentBody(): string {
+    return currentBodyId(this.world, this.st)
+  }
+
   readout(): Readout {
-    const el = osculating(this.world, this.st)
+    // Everything is framed by the body whose SOI we're in.
+    const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
+    const body = SYSTEM[rf.bodyId]
+    const el = stateToElements(rf.relPos, rf.relVel, rf.mu, this.st.t)
     const { apoapsis, periapsis } = apsides(el)
-    const up = this.up()
+    const upRel = norm(rf.relPos)
     const mass = currentMass(this.stages, this.st)
     const stage = this.stages[this.st.stageIndex]
-    const g = surfaceGravity(ROOT_BODY)
+    const g = surfaceGravity(body)
+    const bodyAtmo = body.atmosphere?.height ?? 0
     return {
-      altitude: altitude(this.world, this.st.pos, this.st.t),
-      speed: len(this.st.vel),
-      verticalSpeed: dot(this.st.vel, up),
-      apoapsisAlt: (el.e < 1 ? apoapsis : Infinity) - ROOT_BODY.radius,
-      periapsisAlt: periapsis - ROOT_BODY.radius,
+      altitude: len(rf.relPos) - body.radius,
+      speed: len(rf.relVel),
+      verticalSpeed: dot(rf.relVel, upRel),
+      apoapsisAlt: (el.e < 1 ? apoapsis : Infinity) - body.radius,
+      periapsisAlt: periapsis - body.radius,
       throttle: this.throttle,
       fuel: this.st.fuel,
       stage: this.st.stageIndex,
@@ -189,8 +208,10 @@ export class Game {
       twr: stage && mass > 0 && this.st.fuel > 0 ? (this.throttle * stage.thrust) / (mass * g) : 0,
       autopilot: this.autopilot,
       warp: this.warp,
-      inOrbit: el.e < 1 && periapsis > ROOT_BODY.radius + ATMO,
+      inOrbit: el.e < 1 && periapsis > body.radius + bodyAtmo,
       heading: this.st.heading,
+      bodyName: body.name,
+      landed: this.st.landed,
     }
   }
 

@@ -6,7 +6,7 @@
 // rocket actually reaches a stable orbit.
 
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len } from './units.ts'
-import { bodyPosition } from './bodies.ts'
+import { bodyPosition, referenceFrame, dominantBody } from './bodies.ts'
 import { stateToElements, apsides, type Elements } from './orbit.ts'
 import {
   type FlightWorld,
@@ -31,11 +31,15 @@ function tangentialHeading(world: FlightWorld, st: FlightState, dir: 1 | -1): nu
   return angleOf(rotate(up, (dir * Math.PI) / 2))
 }
 
-/** Osculating orbital elements relative to the root body (which is stationary at origin). */
+/** Osculating orbital elements relative to the vessel's current dominant body (patched conics). */
 export function osculating(world: FlightWorld, st: FlightState): Elements {
-  const rp = bodyPosition(world.system, world.root, st.t)
-  const rel = sub(st.pos, rp)
-  return stateToElements(rel, st.vel, world.system[world.root].mu, st.t)
+  const rf = referenceFrame(world.system, world.root, st.pos, st.vel, st.t)
+  return stateToElements(rf.relPos, rf.relVel, rf.mu, st.t)
+}
+
+/** The id of the body whose SOI the vessel is currently in. */
+export function currentBodyId(world: FlightWorld, st: FlightState): string {
+  return dominantBody(world.system, world.root, st.pos, st.t)
 }
 
 export interface AscentOptions {

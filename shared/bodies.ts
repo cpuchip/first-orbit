@@ -8,7 +8,7 @@
 // Progression arc of the campaign: reach orbit around TERRA -> land on LUNA ->
 // (later) reach MARS and lay the keel of the orbital shipyards ("Mars-field").
 
-import { G } from './units.ts'
+import { G, type Vec2, sub } from './units.ts'
 
 export interface Atmosphere {
   /** Altitude (m above sea level) where the atmosphere effectively ends. */
@@ -97,6 +97,55 @@ export function bodyPosition(
   const parent = bodyPosition(sys, b.parent, t)
   const theta = (b.orbitPhase0 ?? 0) + b.orbitRate * t
   return { x: parent.x + b.orbitRadius * Math.cos(theta), y: parent.y + b.orbitRadius * Math.sin(theta) }
+}
+
+/** Velocity of a body in the root inertial frame at time t (m/s). */
+export function bodyVelocity(sys: Record<string, Body>, id: string, t: number): Vec2 {
+  const b = sys[id]
+  if (!b.parent || !b.orbitRadius || b.orbitRate === undefined) return { x: 0, y: 0 }
+  const parentV = bodyVelocity(sys, b.parent, t)
+  const theta = (b.orbitPhase0 ?? 0) + b.orbitRate * t
+  const speed = b.orbitRate * b.orbitRadius
+  return { x: parentV.x - speed * Math.sin(theta), y: parentV.y + speed * Math.cos(theta) }
+}
+
+/**
+ * The body whose sphere of influence currently dominates a position — the
+ * patched-conic reference body. Returns the deepest (smallest-SOI) body that
+ * contains the point, falling back to the root.
+ */
+export function dominantBody(sys: Record<string, Body>, root: string, absPos: Vec2, t: number): string {
+  let best = root
+  let bestSoi = Infinity
+  for (const b of Object.values(sys)) {
+    if (!b.parent) continue // root is the fallback, not a candidate
+    const bp = bodyPosition(sys, b.id, t)
+    const d = Math.hypot(absPos.x - bp.x, absPos.y - bp.y)
+    if (d < b.soi && b.soi < bestSoi) {
+      best = b.id
+      bestSoi = b.soi
+    }
+  }
+  return best
+}
+
+export interface RefFrame {
+  bodyId: string
+  mu: number
+  relPos: Vec2
+  relVel: Vec2
+}
+
+/** Resolve an absolute state into the frame of its dominant body (patched conics). */
+export function referenceFrame(
+  sys: Record<string, Body>,
+  root: string,
+  absPos: Vec2,
+  absVel: Vec2,
+  t: number,
+): RefFrame {
+  const id = dominantBody(sys, root, absPos, t)
+  return { bodyId: id, mu: sys[id].mu, relPos: sub(absPos, bodyPosition(sys, id, t)), relVel: sub(absVel, bodyVelocity(sys, id, t)) }
 }
 
 /** Surface gravity (m/s^2) at sea level. */

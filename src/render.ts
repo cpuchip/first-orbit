@@ -31,9 +31,9 @@ function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, alpha: n
   ctx.restore()
 }
 
-/** World position of a vessel in the Terra frame at a given universe time. */
+/** World position of a vessel in the root frame at a given universe time. */
 export function vesselWorldPos(v: VesselState, universeTime: number): Vec2 | null {
-  if (v.orbit) return elementsToState(v.orbit, universeTime).pos
+  if (v.orbit) return add(elementsToState(v.orbit, universeTime).pos, bodyPosition(SYSTEM, v.bodyId, universeTime))
   if (v.flight) return vec(v.flight.x, v.flight.y)
   return null
 }
@@ -61,20 +61,23 @@ export function drawFlight(ctx: CanvasRenderingContext2D, w: number, h: number, 
   ctx.fillRect(0, 0, w, h)
   drawStars(ctx, w, h, skyT)
 
-  // The home world (true scale).
-  const rootPos = bodyPosition(SYSTEM, ROOT, st.t)
-  const rc = toScreen(rootPos)
-  ctx.beginPath()
-  ctx.arc(rc.x, rc.y, ROOT_BODY.radius * s, 0, Math.PI * 2)
-  ctx.fillStyle = ROOT_BODY.color
-  ctx.fill()
-  // Atmosphere shell.
-  if (ROOT_BODY.atmosphere) {
+  // Every body, true scale — so the home world is "ground" on the pad and Luna
+  // fills the view on a landing approach, with no special-casing.
+  for (const b of Object.values(SYSTEM) as Body[]) {
+    const bc = toScreen(bodyPosition(SYSTEM, b.id, st.t))
+    const br = b.radius * s
+    if (br < 0.5 && Math.hypot(bc.x - w / 2, bc.y - h / 2) > Math.hypot(w, h)) continue
     ctx.beginPath()
-    ctx.arc(rc.x, rc.y, (ROOT_BODY.radius + ROOT_BODY.atmosphere.height) * s, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(120,170,255,0.25)'
-    ctx.lineWidth = 1
-    ctx.stroke()
+    ctx.arc(bc.x, bc.y, br, 0, Math.PI * 2)
+    ctx.fillStyle = b.color
+    ctx.fill()
+    if (b.atmosphere) {
+      ctx.beginPath()
+      ctx.arc(bc.x, bc.y, (b.radius + b.atmosphere.height) * s, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(120,170,255,0.25)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
   }
 
   drawVessel(ctx, toScreen(st.pos), st.heading, s, r.throttle, r.fuel > 0)
@@ -187,13 +190,14 @@ export function drawMap(
     ctx.fillText(b.name, sc.x + Math.max(5, b.radius * s) + 3, sc.y + 3)
   }
 
-  // The player's own orbit.
+  // The player's own orbit, drawn around whichever body it's bound to.
   const el = game.elements()
+  const pBodyPos = bodyPosition(SYSTEM, game.currentBody(), universeTime)
   if (el.e < 1) {
     const path = orbitPath(el, 160)
     ctx.beginPath()
     path.forEach((p, i) => {
-      const sc = toScreen(p)
+      const sc = toScreen(add(p, pBodyPos))
       if (i === 0) ctx.moveTo(sc.x, sc.y)
       else ctx.lineTo(sc.x, sc.y)
     })
@@ -202,8 +206,8 @@ export function drawMap(
     ctx.stroke()
     // Apo/peri markers (relative to the orbit's periapsis direction).
     const { apoapsis, periapsis } = apsides(el)
-    label(ctx, toScreen(scale(fromAngle(el.argPe), periapsis)), 'Pe')
-    if (apoapsis < Infinity) label(ctx, toScreen(scale(fromAngle(el.argPe + Math.PI), apoapsis)), 'Ap')
+    label(ctx, toScreen(add(scale(fromAngle(el.argPe), periapsis), pBodyPos)), 'Pe')
+    if (apoapsis < Infinity) label(ctx, toScreen(add(scale(fromAngle(el.argPe + Math.PI), apoapsis), pBodyPos)), 'Ap')
   }
 
   // Other players' vessels (propagated by their analytic orbit / last flight snap).

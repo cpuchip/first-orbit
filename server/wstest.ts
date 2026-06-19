@@ -71,7 +71,7 @@ async function main() {
   // Settle onto a circular Terra orbit and confirm the status propagates.
   const r = SYSTEM[ROOT].radius + 90_000
   const orbit = stateToElements({ x: r, y: 0 }, { y: circularSpeed(SYSTEM[ROOT].mu, r), x: 0 }, SYSTEM[ROOT].mu, welcome.universeTime)
-  send(a, { type: 'settle', vesselId: vid, orbit, status: 'orbit' })
+  send(a, { type: 'settle', vesselId: vid, orbit, status: 'orbit', bodyId: ROOT })
   await wait(250)
   const snap2 = await nextOfType(a, 'snapshot')
   const mine = snap2.vessels.find((v) => v.id === vid)

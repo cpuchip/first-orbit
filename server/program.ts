@@ -96,12 +96,13 @@ export class Program {
   }
 
   /** Settle a vessel onto an authoritative analytic orbit when it stops burning. */
-  settle(vesselId: string, owner: string, orbit: VesselState['orbit'], status: VesselState['status']): void {
+  settle(vesselId: string, owner: string, orbit: VesselState['orbit'], status: VesselState['status'], bodyId: string): void {
     const v = this.vessels.get(vesselId)
     if (!v || v.owner !== owner) return
     v.orbit = orbit
     v.flight = undefined
     v.status = status
+    if (bodyId) v.bodyId = bodyId
     this.dirty = true
   }
 

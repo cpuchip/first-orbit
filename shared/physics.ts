@@ -7,7 +7,7 @@
 // game hands control back to the analytic propagator in orbit.ts.
 
 import { type Vec2, vec, add, scale, sub, len, norm, fromAngle } from './units.ts'
-import { type Body, airDensity, bodyPosition } from './bodies.ts'
+import { type Body, airDensity, bodyPosition, bodyVelocity } from './bodies.ts'
 import { G0 } from './units.ts'
 import type { Vehicle } from './vehicle.ts'
 import { part } from './parts.ts'
@@ -187,20 +187,22 @@ export function step(
     fuel = Math.max(0, fuel - mdot * dt)
   }
 
-  // Ground contact with the root body.
-  const root = world.system[world.root]
-  const rp = bodyPosition(world.system, world.root, st.t + dt)
-  const radial = sub(pos, rp)
-  const r = len(radial)
+  // Ground contact with whichever body the vessel has penetrated (Terra or Luna).
   let landed = false
   let finalPos = pos
-  if (r < root.radius) {
-    const up = norm(radial)
-    finalPos = add(rp, scale(up, root.radius))
-    // Cancel inward radial velocity; keep it simple (no bounce).
-    const vr = up.x * vel.x + up.y * vel.y
-    if (vr < 0) vel = sub(vel, scale(up, vr))
-    landed = len(vel) < 2
+  for (const b of Object.values(world.system)) {
+    const bp = bodyPosition(world.system, b.id, st.t + dt)
+    const radial = sub(pos, bp)
+    if (len(radial) < b.radius) {
+      const up = norm(radial)
+      finalPos = add(bp, scale(up, b.radius))
+      const bv = bodyVelocity(world.system, b.id, st.t + dt)
+      const relVel = sub(vel, bv)
+      const vr = up.x * relVel.x + up.y * relVel.y
+      if (vr < 0) vel = sub(vel, scale(up, vr)) // cancel inward radial; no bounce
+      landed = len(sub(vel, bv)) < 3 // touchdown is slow relative to the body
+      break
+    }
   }
 
   return { t: st.t + dt, pos: finalPos, vel, heading, throttle, stageIndex, fuel, landed }

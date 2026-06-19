@@ -199,6 +199,7 @@
   {#if screen === 'flight' && hud}
     <div class="hud">
       <div class="readouts panel">
+        <div class="body-name">▷ {hud.bodyName.toUpperCase()}</div>
         <div class="row big"><span>ALT</span><b>{km(hud.altitude)}</b></div>
         <div class="row big"><span>SPD</span><b>{fmt(hud.speed, ' m/s')}</b></div>
         <div class="row"><span>Apoapsis</span><b>{hud.apoapsisAlt === Infinity ? '—' : km(hud.apoapsisAlt)}</b></div>
@@ -206,7 +207,7 @@
         <div class="row"><span>Vert spd</span><b>{hud.verticalSpeed.toFixed(0)} m/s</b></div>
         <div class="row"><span>Stage</span><b>{hud.stage + 1}/{hud.stageCount} · {fmt(hud.fuel)} fuel</b></div>
         <div class="row"><span>TWR</span><b>{hud.twr.toFixed(2)}</b></div>
-        {#if hud.inOrbit}<div class="orbit-flag">● STABLE ORBIT</div>{/if}
+        {#if hud.landed}<div class="orbit-flag landed">● LANDED on {hud.bodyName}</div>{:else if hud.inOrbit}<div class="orbit-flag">● STABLE ORBIT</div>{/if}
       </div>
 
       <div class="throttle panel">
@@ -260,6 +261,8 @@
   .row b { color: #e8eaed; font-variant-numeric: tabular-nums; }
   .row.big b { font-size: 18px; }
   .orbit-flag { margin-top: 8px; color: #2ecc71; font-weight: 700; font-size: 13px; letter-spacing: 1px; }
+  .orbit-flag.landed { color: #f1c40f; }
+  .body-name { font-size: 12px; letter-spacing: 2px; color: #7fb0ff; margin-bottom: 4px; }
   .throttle { top: 14px; right: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .throttle .bar { width: 14px; height: 120px; background: #0c111c; border-radius: 7px; overflow: hidden; display: flex; align-items: flex-end; }
   .throttle .fill { width: 100%; background: linear-gradient(#2f6fed, #2ecc71); transition: height 0.05s linear; }
