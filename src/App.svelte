@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { Net } from './net.ts'
   import { Game } from './game.ts'
-  import { drawFlight, drawMap } from './render.ts'
+  import { drawFlight, drawMap, mapScale } from './render.ts'
   import { referenceRocket, performance as stagePerformance, totalDeltaV, totalMass } from '../shared/vehicle.ts'
   import { SYSTEM, ROOT, surfaceGravity } from '../shared/bodies.ts'
   import type { PlayerInfo, VesselState, ServerMsg } from '../shared/netproto.ts'
@@ -20,6 +20,8 @@
   let chat = $state<{ from: string; color: string; text: string }[]>([])
   let chatInput = $state('')
   let mapZoom = $state(1)
+  let mapCenter = $state({ x: 0, y: 0 })
+  let mapFollow = $state(false)
   let hud = $state<ReturnType<Game['readout']> | null>(null)
   let nodeInfo = $state<ReturnType<Game['nodeReadout']>>(null)
   let you = $state<PlayerInfo | null>(null)
@@ -223,8 +225,10 @@
         game.update(dt)
         hud = game.readout()
         nodeInfo = game.nodeReadout()
-        if (view === 'map') drawMap(ctx, canvas.width, canvas.height, game, vessels, players, universeTime(), mapZoom)
-        else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, universeTime())
+        if (view === 'map') {
+          if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }
+          drawMap(ctx, canvas.width, canvas.height, game, vessels, players, universeTime(), mapZoom, mapCenter)
+        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, universeTime())
       }
       raf = requestAnimationFrame(frame)
     }
@@ -232,10 +236,42 @@
       const w = canvas.clientWidth, h = canvas.clientHeight
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
     }
+    // Map pan (drag) and zoom (wheel).
+    const onWheel = (e: WheelEvent) => {
+      if (view !== 'map') return
+      e.preventDefault()
+      mapZoom = Math.max(0.15, Math.min(80, mapZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+    }
+    let dragging = false, lastX = 0, lastY = 0
+    const onDown = (e: PointerEvent) => {
+      if (view !== 'map') return
+      dragging = true; lastX = e.clientX; lastY = e.clientY
+    }
+    const onMove = (e: PointerEvent) => {
+      if (!dragging || view !== 'map') return
+      const s = mapScale(canvas.width, canvas.height, mapZoom)
+      mapCenter = { x: mapCenter.x - (e.clientX - lastX) / s, y: mapCenter.y + (e.clientY - lastY) / s }
+      mapFollow = false
+      lastX = e.clientX; lastY = e.clientY
+    }
+    const onUp = () => { dragging = false }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    canvas.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+
     raf = requestAnimationFrame(frame)
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
-    return () => { cancelAnimationFrame(raf); window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp) }
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      canvas.removeEventListener('wheel', onWheel)
+      canvas.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
   })
 
   const fmt = (n: number, u = '') => `${n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n.toFixed(0)}${u}`
@@ -379,6 +415,17 @@
         {#each chat as c}<div class="line"><b style="color:{c.color}">{c.from}</b> {c.text}</div>{/each}
         <input placeholder="message…" bind:value={chatInput} onkeydown={(e) => e.key === 'Enter' && sendChat()} />
       </div>
+
+      {#if view === 'map'}
+        <div class="map-controls panel">
+          <button class="mc" onclick={() => (mapZoom = Math.max(0.15, mapZoom / 1.4))}>−</button>
+          <span class="zoom">{mapZoom >= 1 ? mapZoom.toFixed(1) : mapZoom.toFixed(2)}×</span>
+          <button class="mc" onclick={() => (mapZoom = Math.min(80, mapZoom * 1.4))}>+</button>
+          <button class="mc wide" class:on={mapFollow} onclick={() => (mapFollow = !mapFollow)}>⊙ Follow</button>
+          <button class="mc wide" onclick={() => { mapCenter = { x: 0, y: 0 }; mapFollow = false; mapZoom = 1 }}>⌖ Reset</button>
+          <span class="mc-hint">scroll = zoom · drag = pan</span>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -444,7 +491,13 @@
   .chat { bottom: 14px; right: 14px; width: 260px; max-height: 200px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
   .chat .line { color: #c8ccd2; }
   .chat input { margin: 6px 0 0; padding: 6px 8px; font-size: 13px; }
-  .node { bottom: 14px; left: 50%; transform: translateX(-50%); min-width: 220px; }
+  .map-controls { bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
+  .mc { width: auto; padding: 5px 10px; background: #161c28; color: #c8ccd2; font-size: 13px; font-weight: 600; }
+  .mc.wide { font-weight: 500; }
+  .mc.on { background: #2ecc71; color: #05060a; }
+  .zoom { min-width: 44px; text-align: center; font-size: 13px; color: #9aa0a6; font-variant-numeric: tabular-nums; }
+  .mc-hint { color: #6a707a; font-size: 11px; margin-left: 6px; }
+  .node { bottom: 70px; left: 50%; transform: translateX(-50%); min-width: 220px; }
   .node-title { color: #f1c40f; font-weight: 700; font-size: 12px; letter-spacing: 1px; margin-bottom: 6px; }
   .node-keys { margin-top: 6px; color: #6a707a; font-size: 11px; }
   .board { position: absolute; top: 190px; right: 14px; width: 188px; padding: 10px 12px; z-index: 5; }

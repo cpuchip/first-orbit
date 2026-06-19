@@ -219,6 +219,12 @@ function drawVessel(ctx: CanvasRenderingContext2D, p: Vec2, heading: number, s: 
   ctx.restore()
 }
 
+/** Map pixels-per-metre at a given zoom — shared by the renderer and the pan/zoom UI. */
+export function mapScale(w: number, h: number, zoom: number): number {
+  const fit = (SYSTEM['luna'].orbitRadius ?? 1_000_000) * 1.25
+  return ((Math.min(w, h) / 2) / fit) * zoom
+}
+
 // ---- orbital map ---------------------------------------------------------------
 export function drawMap(
   ctx: CanvasRenderingContext2D,
@@ -229,15 +235,13 @@ export function drawMap(
   players: PlayerInfo[],
   universeTime: number,
   zoom: number,
+  center: Vec2 = vec(0, 0),
 ): void {
   ctx.fillStyle = '#05060a'
   ctx.fillRect(0, 0, w, h)
   drawStars(ctx, w, h, 1)
 
-  // Fit Luna's orbit, scaled by the player's zoom.
-  const fit = (SYSTEM['luna'].orbitRadius ?? 1_000_000) * 1.25
-  const s = ((Math.min(w, h) / 2) / fit) * zoom
-  const center = vec(0, 0) // Terra-centred
+  const s = mapScale(w, h, zoom)
   const toScreen = (p: Vec2): Vec2 => vec(w / 2 + (p.x - center.x) * s, h / 2 - (p.y - center.y) * s)
 
   const playerColor = new Map(players.map((p) => [p.id, p.color]))
