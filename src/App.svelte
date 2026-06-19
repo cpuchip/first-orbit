@@ -25,6 +25,7 @@
   let you = $state<PlayerInfo | null>(null)
   let toasts = $state<{ id: number; text: string; color: string; first: boolean }[]>([])
   let toastSeq = 0
+  let showBoard = $state(true)
 
   // Universe clock, anchored to the last server time we heard.
   let serverTime = 0
@@ -176,6 +177,7 @@
     if (k === ' ') { e.preventDefault(); game.stageNow() }
     if (k === 'g') game.toggleAutopilot()
     if (k === 'm') view = view === 'map' ? 'flight' : 'map'
+    if (k === 'p') showBoard = !showBoard
     if (k === 'r') recover()
     if (k === '.') game.warp = Math.min(100000, game.warp * 10)
     if (k === ',') game.warp = Math.max(1, game.warp / 10)
@@ -222,7 +224,7 @@
         hud = game.readout()
         nodeInfo = game.nodeReadout()
         if (view === 'map') drawMap(ctx, canvas.width, canvas.height, game, vessels, players, universeTime(), mapZoom)
-        else drawFlight(ctx, canvas.width, canvas.height, game)
+        else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, universeTime())
       }
       raf = requestAnimationFrame(frame)
     }
@@ -247,6 +249,20 @@
     <div class="toasts">
       {#each toasts as t (t.id)}
         <div class="toast" class:first={t.first}><b style="color:{t.color}">{t.text}</b></div>
+      {/each}
+    </div>
+  {/if}
+
+  {#if showBoard && players.length && screen !== 'menu'}
+    <div class="board panel">
+      <div class="board-title">SPACE PROGRAM · {players.length}</div>
+      {#each [...players].sort((a, b) => b.science - a.science || b.funds - a.funds) as p (p.id)}
+        <div class="board-row" class:me={p.id === you?.id}>
+          <span class="dot" style="background:{p.color}"></span>
+          <span class="pname">{p.name}</span>
+          <span class="pbadges" title="milestones">{p.achieved.length}/6</span>
+          <span class="psci">⚛{p.science}</span>
+        </div>
       {/each}
     </div>
   {/if}
@@ -342,7 +358,7 @@
         <span>[A/D] Rotate · [W/S] Throttle</span>
         <span>[,/.] Warp {hud.warp}×</span>
         <span class:on={!!nodeInfo}>[N] Maneuver node {nodeInfo ? '✓' : ''}</span>
-        <span>[M] {view === 'map' ? 'Flight' : 'Map'} · [R] Recover</span>
+        <span>[M] {view === 'map' ? 'Flight' : 'Map'} · [R] Recover · [P] Standings</span>
       </div>
 
       {#if nodeInfo}
@@ -429,4 +445,12 @@
   .node { bottom: 14px; left: 50%; transform: translateX(-50%); min-width: 220px; }
   .node-title { color: #f1c40f; font-weight: 700; font-size: 12px; letter-spacing: 1px; margin-bottom: 6px; }
   .node-keys { margin-top: 6px; color: #6a707a; font-size: 11px; }
+  .board { position: absolute; top: 190px; right: 14px; width: 188px; padding: 10px 12px; z-index: 5; }
+  .board-title { color: #7fb0ff; font-size: 11px; letter-spacing: 1.5px; margin-bottom: 7px; }
+  .board-row { display: flex; align-items: center; gap: 7px; padding: 2px 0; font-size: 12px; color: #c8ccd2; }
+  .board-row.me { color: #fff; font-weight: 600; }
+  .board-row .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .pname { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pbadges { color: #7a808a; font-variant-numeric: tabular-nums; }
+  .psci { color: #f1c40f; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 </style>

@@ -39,8 +39,33 @@ export function vesselWorldPos(v: VesselState, universeTime: number): Vec2 | nul
   return null
 }
 
+// Eased display positions, so other players' active flights glide between the
+// 10 Hz server snapshots instead of teleporting. Coasting vessels are analytic
+// (already smooth) so they snap exactly.
+const displayPos = new Map<string, Vec2>()
+export function vesselDisplayPos(v: VesselState, universeTime: number): Vec2 | null {
+  const target = vesselWorldPos(v, universeTime)
+  if (!target) return null
+  if (v.flight) {
+    const cur = displayPos.get(v.id)
+    const next = cur ? { x: cur.x + (target.x - cur.x) * 0.25, y: cur.y + (target.y - cur.y) * 0.25 } : { ...target }
+    displayPos.set(v.id, next)
+    return next
+  }
+  displayPos.set(v.id, target)
+  return target
+}
+
 // ---- flight view ---------------------------------------------------------------
-export function drawFlight(ctx: CanvasRenderingContext2D, w: number, h: number, game: Game): void {
+export function drawFlight(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  game: Game,
+  vessels: VesselState[] = [],
+  players: PlayerInfo[] = [],
+  universeTime = 0,
+): void {
   const st = game.st
   const r = game.readout()
   const alt = r.altitude
@@ -79,6 +104,27 @@ export function drawFlight(ctx: CanvasRenderingContext2D, w: number, h: number, 
       ctx.lineWidth = 1
       ctx.stroke()
     }
+  }
+
+  // Other players nearby — rendezvous presence.
+  const colors = new Map(players.map((p) => [p.id, p.color]))
+  for (const v of vessels) {
+    if (v.id === game.vesselId) continue
+    const p = vesselDisplayPos(v, universeTime)
+    if (!p) continue
+    const sc = toScreen(p)
+    if (sc.x < -30 || sc.x > w + 30 || sc.y < -30 || sc.y > h + 30) continue
+    const col = colors.get(v.owner) ?? '#888'
+    ctx.fillStyle = col
+    ctx.beginPath()
+    ctx.moveTo(sc.x, sc.y - 6)
+    ctx.lineTo(sc.x + 5, sc.y + 5)
+    ctx.lineTo(sc.x - 5, sc.y + 5)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'
+    ctx.font = '10px system-ui, sans-serif'
+    ctx.fillText(`${v.name} · ${v.ownerName}`, sc.x + 8, sc.y)
   }
 
   drawVessel(ctx, toScreen(st.pos), st.heading, s, r.throttle, r.fuel > 0)
@@ -244,7 +290,7 @@ export function drawMap(
   // Other players' vessels (propagated by their analytic orbit / last flight snap).
   for (const v of vessels) {
     if (v.id === game.vesselId) continue // our own is drawn live, below
-    const p = vesselWorldPos(v, universeTime)
+    const p = vesselDisplayPos(v, universeTime)
     if (!p) continue
     const sc = toScreen(p)
     mark(ctx, sc, playerColor.get(v.owner) ?? '#888')
