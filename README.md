@@ -14,21 +14,27 @@ ascent autopilot, maneuver planning — shipped in the base game.
 
 **Live:** [orbit.cpuchip.net](https://orbit.cpuchip.net)
 
-## What works today (v0.1)
+## What works today (v0.6)
 
 - **Real two-regime physics.** Step-integrated thrust / gravity / atmospheric drag
   during powered flight; exact analytic Keplerian orbits while coasting. The split
   is what makes deterministic, low-bandwidth multiplayer tractable — a coasting
   vessel is a function of time, not a stream of packets.
-- **Vehicle Assembly readouts** — per-stage Δv and thrust-to-weight, from the
-  rocket equation (the "Kerbal Engineer" mod, baked in).
-- **Ascent autopilot** — a gravity-turn "fly me to orbit" button (the "MechJeb"
-  mod, baked in).
-- **Flight view** — auto-zooming side-on view; the home world is true-scale, so it
+- **Patched conics.** Gravity, your orbit, and the HUD re-reference to whichever
+  body's sphere of influence you're in — fly to Luna, capture, and land on it.
+- **Rocket configurator.** Design your vehicle: per-stage engine type **and count**
+  (clusters), tank count + size, fins, add/remove stages. Live Δv / TWR (the
+  "Kerbal Engineer" readouts, baked in). Presets + auto-saved to your browser.
+- **Ascent autopilot** — a gravity-turn "fly me to orbit" button ("MechJeb", baked in).
+- **Maneuver nodes** — plan a burn (prograde/radial) at a future point, see the
+  predicted orbit, warp to it, and auto-execute. The heart of orbital gameplay.
+- **A space program with stakes.** Milestones (reach orbit, land on Luna, …) award
+  funds + science and broadcast "★ first to …" to everyone. A live standings board.
+- **Live multiplayer.** One solar system, one universe clock, a shared roster, chat.
+  See each other's vessels on the map and in flight (rendezvous), smoothly
+  interpolated. Persisted across redeploys.
+- **Flight view** — auto-zooming side-on view; bodies are true-scale, so the world
   fills the screen as ground on the pad and shrinks into a planet as you climb.
-- **Orbital map** — Terra, Luna, your orbit, and everyone else's vessels.
-- **Shared space program** — one solar system, one universe clock, a roster, and
-  live chat. Persisted across redeploys.
 
 ## Stack
 

@@ -6,37 +6,35 @@ This mirrors how the deadweight game was driven to parity — small, verified,
 deployable increments.
 
 ## v0.1 — Foundation ✅ (2026-06-19)
-Deterministic two-regime sim (powered physics + analytic Kepler), VAB Δv/TWR
-readouts, ascent autopilot, flight + map views, authoritative `ws` server with a
-shared persistent program + chat, Dockerfile/compose for Dokploy, the Gemini asset
-pipeline. Both oracles green; full loop browser-verified.
+Deterministic two-regime sim, VAB Δv/TWR, ascent autopilot, flight + map views,
+authoritative `ws` server + shared persistent program + chat, Dokploy compose,
+Gemini asset pipeline. Both oracles green; live at orbit.cpuchip.net.
 
-## v0.2 — Land & return
-- Patched conics across Luna's sphere of influence (transfer, capture, the map
-  re-references to Luna inside its SOI).
-- Touchdown detection + landed state; parachutes that bite in atmosphere.
-- Recover-for-funds; a first contract ("reach orbit", "land on Luna").
-- Oracle: a scripted Terra→Luna transfer that captures and lands.
+## v0.2 — Patched conics & Luna ✅ (2026-06-19)
+SOI re-referencing (dominantBody/referenceFrame), fly + capture + land on Luna,
+true-scale bodies in the flight view. Oracle: SOI selection, frame continuity,
+bound low-Luna orbit.
 
-## v0.3 — The Assembly
-- Real drag-drop 2D vehicle assembly: stack/attach parts, set staging order.
-- The part catalogue surfaced as a parts bin; save/load designs per player.
-- Generated part-icon art (the `gen-assets` set) wired into the VAB.
+## v0.3 — The Assembly (configurator) ✅ (2026-06-19)
+Per-stage engine type + count (clusters), tanks/size, fins, add/remove stages,
+live Δv/TWR, presets, localStorage persistence. *(Still wanted: full drag-drop
+attach + generated part-icon art from `gen-assets`.)*
 
-## v0.4 — Maneuver nodes & planning
-- Plan a burn on the map (the maneuver node), see the resulting orbit, and a
-  node executor + "warp to node" (the Kerbal Alarm Clock / MechJeb node features).
-- Transfer-window hinting toward Luna/Mars (porkchop-lite).
+## v0.4 — Maneuver nodes ✅ (2026-06-19)
+Plan Δv (prograde/radial) at a future point, dashed predicted orbit, warp-to-node,
+auto-execute. Oracle: circularization node → circular orbit; zero node = no-op.
+*(Still wanted: porkchop transfer-window hinting.)*
 
-## v0.5 — Multiplayer presence, live
-- Smooth interpolation of other players' active flights (not just coasting).
-- Per-player funds/science economy; a shared tech tree that unlocks parts.
-- Synchronous co-flight in the same region (subspace time-warp reconciliation).
+## v0.5 — Economy & live multiplayer ✅ (2026-06-19)
+Milestones → funds/science + "★ first to…" broadcasts + recovery; standings
+board; other players visible on the map AND in flight (rendezvous) with eased
+interpolation. *(Still wanted: shared tech tree, synchronous co-flight.)*
 
-## v0.6 — Mars & the shipyards
+## v0.6 — Mars & the shipyards (NEXT)
 - Add Sol + Mars; the campaign arc ends by reaching Mars orbit and placing the
   first shipyard module — the literal origin of "Mars-field built."
 - Science from biomes/altitudes; the progression loop.
+- Server-side saved designs; part-icon art; sound.
 
 ## Later
 - More bodies, aerobraking, rover/EVA, re-entry heating, sounds, mobile controls.
