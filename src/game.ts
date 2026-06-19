@@ -19,6 +19,8 @@ import {
 import { osculating, currentBodyId } from '../shared/autopilot.ts'
 import { apsides, stateToElements } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
+import { type ManeuverNode, applyNode, nodeDeltaV } from '../shared/maneuver.ts'
+import { TAU } from '../shared/units.ts'
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len } from '../shared/units.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
 import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
@@ -65,6 +67,10 @@ export class Game {
   private netAccum = 0
   private milestoneFired = new Set<MilestoneKind>()
   private wasInSpace = false
+  node: ManeuverNode | null = null
+  private executingNode = false
+  private nodeRemaining = 0
+  private warpingToNode = false
   send: (m: ClientMsg) => void = () => {}
   onMilestone: (kind: MilestoneKind) => void = () => {}
 
@@ -79,6 +85,9 @@ export class Game {
     this.settled = false
     this.milestoneFired.clear()
     this.wasInSpace = false
+    this.node = null
+    this.executingNode = false
+    this.warpingToNode = false
   }
 
   stageNow(): void {
@@ -87,6 +96,61 @@ export class Game {
   toggleAutopilot(): void {
     this.autopilot = !this.autopilot
     if (this.autopilot) this.apPhase = 'ascent'
+  }
+
+  // --- maneuver nodes -----------------------------------------------------
+  toggleNode(): void {
+    if (this.node) {
+      this.node = null
+      this.executingNode = false
+      this.warpingToNode = false
+      return
+    }
+    // Place the node at the next apoapsis (the natural circularization point).
+    const el = this.elements()
+    const absA = Math.abs(el.a)
+    const n = Math.sqrt(el.mu / (absA * absA * absA))
+    let dt = 120
+    if (el.e < 1) dt = ((((Math.PI - el.M0) % TAU) + TAU) % TAU) / n
+    this.node = { t: this.st.t + dt, prograde: 0, radial: 0 }
+  }
+  adjustNode(dPrograde: number, dRadial: number): void {
+    if (this.node) {
+      this.node.prograde += dPrograde
+      this.node.radial += dRadial
+    }
+  }
+  moveNode(dt: number): void {
+    if (this.node) this.node.t = Math.max(this.st.t + 1, this.node.t + dt)
+  }
+  executeNode(): void {
+    if (!this.node) return
+    this.executingNode = true
+    this.warpingToNode = false
+    this.autopilot = false
+    this.warp = 1
+    this.nodeRemaining = nodeDeltaV(this.node)
+  }
+  toggleWarpToNode(): void {
+    if (this.node) this.warpingToNode = !this.warpingToNode
+  }
+  plannedElements(): Elements | null {
+    return this.node ? applyNode(this.elements(), this.node) : null
+  }
+  nodeReadout(): { pro: number; rad: number; dv: number; tMinus: number; apoAlt: number; periAlt: number; executing: boolean } | null {
+    if (!this.node) return null
+    const planned = this.plannedElements()!
+    const body = SYSTEM[currentBodyId(this.world, this.st)]
+    const { apoapsis, periapsis } = apsides(planned)
+    return {
+      pro: this.node.prograde,
+      rad: this.node.radial,
+      dv: nodeDeltaV(this.node),
+      tMinus: this.node.t - this.st.t,
+      apoAlt: (planned.e < 1 ? apoapsis : Infinity) - body.radius,
+      periAlt: periapsis - body.radius,
+      executing: this.executingNode,
+    }
   }
 
   private up(): Vec2 {
@@ -108,7 +172,25 @@ export class Game {
     const vSpeed = dot(this.st.vel, up)
 
     // --- guidance -----------------------------------------------------------
-    if (this.autopilot) {
+    if (this.executingNode && this.node) {
+      // Burn in the planned direction (prograde/radial mix), counting down Δv.
+      const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
+      const dir = norm(add(scale(norm(rf.relVel), this.node.prograde), scale(norm(rf.relPos), this.node.radial)))
+      this.st.heading = angleOf(dir)
+      this.throttle = 1
+      const stage = this.stages[this.st.stageIndex]
+      const mass = currentMass(this.stages, this.st)
+      if (stage && this.st.fuel > 1e-6 && mass > 0) this.nodeRemaining -= (stage.thrust / mass) * dt
+      if (this.st.fuel <= 1e-6 && this.st.stageIndex < this.stages.length - 1) this.stageReq = true
+      if (this.nodeRemaining <= 0) {
+        this.executingNode = false
+        this.throttle = 0
+        this.node = null
+      } else if (this.st.fuel <= 1e-6 && this.st.stageIndex >= this.stages.length - 1) {
+        this.executingNode = false
+        this.throttle = 0
+      }
+    } else if (this.autopilot) {
       const apoReady = el.e < 1 && apoapsis >= targetR
       if (this.apPhase === 'ascent') {
         this.throttle = 1
@@ -130,6 +212,17 @@ export class Game {
       }
     } else if (this.rotateInput !== 0) {
       this.st.heading += this.rotateInput * 1.8 * dt
+    }
+
+    // Warp-to-node: ramp the time-warp down as the node approaches.
+    if (this.warpingToNode && this.node && this.throttle === 0) {
+      const dtToNode = this.node.t - this.st.t
+      if (dtToNode <= 2) {
+        this.warpingToNode = false
+        this.warp = 1
+      } else {
+        this.warp = dtToNode > 600 ? 1000 : dtToNode > 60 ? 100 : 10
+      }
     }
 
     // Throttle forces warp back to 1 — you cannot warp under power.

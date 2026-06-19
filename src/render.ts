@@ -7,6 +7,7 @@
 
 import { SYSTEM, ROOT, bodyPosition, type Body } from '../shared/bodies.ts'
 import { elementsToState, orbitPath, apsides } from '../shared/orbit.ts'
+import { nodeState } from '../shared/maneuver.ts'
 import { type Vec2, vec, add, scale, fromAngle, len } from '../shared/units.ts'
 import type { Game } from './game.ts'
 import type { VesselState, PlayerInfo } from '../shared/netproto.ts'
@@ -208,6 +209,36 @@ export function drawMap(
     const { apoapsis, periapsis } = apsides(el)
     label(ctx, toScreen(add(scale(fromAngle(el.argPe), periapsis), pBodyPos)), 'Pe')
     if (apoapsis < Infinity) label(ctx, toScreen(add(scale(fromAngle(el.argPe + Math.PI), apoapsis), pBodyPos)), 'Ap')
+  }
+
+  // Maneuver node: the planned orbit (dashed gold) + the burn marker.
+  const planned = game.plannedElements()
+  if (game.node) {
+    if (planned && planned.e < 1) {
+      const path = orbitPath(planned, 160)
+      ctx.setLineDash([6, 5])
+      ctx.beginPath()
+      path.forEach((p, i) => {
+        const sc = toScreen(add(p, pBodyPos))
+        if (i === 0) ctx.moveTo(sc.x, sc.y)
+        else ctx.lineTo(sc.x, sc.y)
+      })
+      ctx.strokeStyle = 'rgba(241,196,15,0.85)'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+    const ns = nodeState(el, game.node)
+    const nsc = toScreen(add(ns.pos, pBodyPos))
+    ctx.fillStyle = '#f1c40f'
+    ctx.beginPath()
+    ctx.arc(nsc.x, nsc.y, 5, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#f1c40f'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.arc(nsc.x, nsc.y, 9, 0, Math.PI * 2)
+    ctx.stroke()
   }
 
   // Other players' vessels (propagated by their analytic orbit / last flight snap).

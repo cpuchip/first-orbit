@@ -19,6 +19,7 @@ import {
 } from '../orbit.ts'
 import { referenceRocket, performance, totalDeltaV } from '../vehicle.ts'
 import { simulateToOrbit } from '../autopilot.ts'
+import { applyNode, nodeDeltaV } from '../maneuver.ts'
 import type { FlightWorld } from '../physics.ts'
 
 let passed = 0
@@ -175,6 +176,31 @@ console.log('First Orbit — smoke oracle\n')
   const elLuna = stateToElements(rf2.relPos, rf2.relVel, rf2.mu, 0)
   const periAlt = apsides(elLuna).periapsis - luna.radius
   check('low Luna orbit is bound & circular', elLuna.e < 0.01 && Math.abs(periAlt - 50_000) < 500, `e=${elLuna.e.toFixed(4)} periAlt=${(periAlt / 1000).toFixed(1)}km`)
+}
+
+// --- 9. Maneuver nodes: plan a burn, predict the orbit --------------------------
+{
+  // An eccentric orbit; periapsis at (r1,0) since v there exceeds circular.
+  const r1 = terra.radius + 100_000
+  const vc = circularSpeed(mu, r1)
+  const el = stateToElements(vec(r1, 0), vec(0, vc * 1.3), mu, 0)
+  const ra = apsides(el).apoapsis
+  const tApo = period(el) / 2 // apoapsis is half a period after periapsis
+
+  // Zero node is a no-op.
+  const same = applyNode(el, { t: tApo, prograde: 0, radial: 0 })
+  check('zero node is a no-op', close(same.a, el.a, 1e-6) && Math.abs(same.e - el.e) < 1e-6)
+
+  // Circularize at apoapsis: prograde Δv = vCirc(ra) - vApo.
+  const vApo = visViva(mu, ra, el.a)
+  const dv = circularSpeed(mu, ra) - vApo
+  const node = { t: tApo, prograde: dv, radial: 0 }
+  const circ = applyNode(el, node)
+  check(
+    'circularization node yields a circular orbit',
+    circ.e < 0.005 && Math.abs(apsides(circ).periapsis - ra) < ra * 0.005,
+    `e=${circ.e.toFixed(4)} dv=${nodeDeltaV(node).toFixed(0)} m/s`,
+  )
 }
 
 // --- Summary --------------------------------------------------------------------

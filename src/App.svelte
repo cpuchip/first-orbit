@@ -22,6 +22,7 @@
   let chatInput = $state('')
   let mapZoom = $state(1)
   let hud = $state<ReturnType<Game['readout']> | null>(null)
+  let nodeInfo = $state<ReturnType<Game['nodeReadout']>>(null)
   let you = $state<PlayerInfo | null>(null)
   let toasts = $state<{ id: number; text: string; color: string; first: boolean }[]>([])
   let toastSeq = 0
@@ -132,6 +133,20 @@
     if (k === 'r') recover()
     if (k === '.') game.warp = Math.min(100000, game.warp * 10)
     if (k === ',') game.warp = Math.max(1, game.warp / 10)
+    // maneuver node editing
+    if (k === 'n') game.toggleNode()
+    if (game.node) {
+      const dv = e.shiftKey ? 100 : 10
+      const ts = e.shiftKey ? 300 : 30
+      if (k === 'i') game.adjustNode(dv, 0)
+      if (k === 'k') game.adjustNode(-dv, 0)
+      if (k === 'l') game.adjustNode(0, dv)
+      if (k === 'j') game.adjustNode(0, -dv)
+      if (k === 'o') game.moveNode(ts)
+      if (k === 'u') game.moveNode(-ts)
+      if (k === 'b') game.executeNode()
+      if (k === 'y') game.toggleWarpToNode()
+    }
   }
   function onKeyUp(e: KeyboardEvent) {
     keys.delete(e.key.toLowerCase())
@@ -159,6 +174,7 @@
         pollKeys(dt)
         game.update(dt)
         hud = game.readout()
+        nodeInfo = game.nodeReadout()
         if (view === 'map') drawMap(ctx, canvas.width, canvas.height, game, vessels, players, universeTime(), mapZoom)
         else drawFlight(ctx, canvas.width, canvas.height, game)
       }
@@ -249,8 +265,22 @@
         <span>[Space] Stage</span>
         <span>[A/D] Rotate · [W/S] Throttle</span>
         <span>[,/.] Warp {hud.warp}×</span>
+        <span class:on={!!nodeInfo}>[N] Maneuver node {nodeInfo ? '✓' : ''}</span>
         <span>[M] {view === 'map' ? 'Flight' : 'Map'} · [R] Recover</span>
       </div>
+
+      {#if nodeInfo}
+        <div class="node panel">
+          <div class="node-title">⬗ MANEUVER {nodeInfo.executing ? '· BURNING' : ''}</div>
+          <div class="row"><span>Δv</span><b>{nodeInfo.dv.toFixed(0)} m/s</b></div>
+          <div class="row"><span>Prograde</span><b>{nodeInfo.pro >= 0 ? '+' : ''}{nodeInfo.pro.toFixed(0)}</b></div>
+          <div class="row"><span>Radial</span><b>{nodeInfo.rad >= 0 ? '+' : ''}{nodeInfo.rad.toFixed(0)}</b></div>
+          <div class="row"><span>T−</span><b>{nodeInfo.tMinus > 0 ? fmt(nodeInfo.tMinus, 's') : 'now'}</b></div>
+          <div class="row"><span>→ Apo</span><b>{nodeInfo.apoAlt === Infinity ? '— (escape)' : km(nodeInfo.apoAlt)}</b></div>
+          <div class="row"><span>→ Peri</span><b>{km(nodeInfo.periAlt)}</b></div>
+          <div class="node-keys">[I/K] pro · [J/L] rad · [U/O] time · [Y] warp-to · [B] burn · [N] clear · ⇧=×10</div>
+        </div>
+      {/if}
 
       <div class="chat panel">
         {#each chat as c}<div class="line"><b style="color:{c.color}">{c.from}</b> {c.text}</div>{/each}
@@ -306,4 +336,7 @@
   .chat { bottom: 14px; right: 14px; width: 260px; max-height: 200px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
   .chat .line { color: #c8ccd2; }
   .chat input { margin: 6px 0 0; padding: 6px 8px; font-size: 13px; }
+  .node { bottom: 14px; left: 50%; transform: translateX(-50%); min-width: 220px; }
+  .node-title { color: #f1c40f; font-weight: 700; font-size: 12px; letter-spacing: 1px; margin-bottom: 6px; }
+  .node-keys { margin-top: 6px; color: #6a707a; font-size: 11px; }
 </style>
