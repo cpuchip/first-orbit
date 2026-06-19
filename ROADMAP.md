@@ -1,9 +1,21 @@
 # First Orbit — roadmap
 
 The drive from a proven core to a game friends play. Each version is a tested
-commit+push; the oracles (`smoke`, `wstest`, `compile`, `build`) gate every step.
-This mirrors how the deadweight game was driven to parity — small, verified,
-deployable increments.
+commit+push; the oracles (`smoke`, `wstest`, `burntest`, `compile`, `build`) gate
+every step. This mirrors how the deadweight game was driven to parity — small,
+verified, deployable increments.
+
+## v1.0 — REACHED 🚀 (2026-06-19)
+A complete, polished Terra–Luna game: build rockets, fly with full control (ascent
+autopilot, SAS, maneuver-node queues with arm→auto-burn, zoom/pan/right-click
+targeting), run a shared space program (public Frontier MMO + private rooms,
+rejoin, milestones, standings, objectives, a flight manual), with an AI co-pilot
+over MCP. Oracles green: smoke 19, wstest 10, burntest 6.
+
+**Next major arc — interplanetary (v1.x):** Sol + Mars and the first Mars-field
+shipyard module (the literal "Mars-field built" origin). This is a real
+heliocentric expansion — separating the launch body from the system root, a
+solar-scale map, and transfer planning — best built as its own focused goal.
 
 ## v0.1 — Foundation ✅ (2026-06-19)
 Deterministic two-regime sim, VAB Δv/TWR, ascent autopilot, flight + map views,

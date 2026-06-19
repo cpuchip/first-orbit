@@ -1,6 +1,6 @@
 {
   "name": "first-orbit",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "First Orbit — a 2D browser multiplayer rocketry game in the Hubble Frontier origin era.",
   "type": "module",
   "scripts": {

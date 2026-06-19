@@ -14,7 +14,7 @@ ascent autopilot, maneuver planning — shipped in the base game.
 
 **Live:** [orbit.cpuchip.net](https://orbit.cpuchip.net)
 
-## What works today (v0.6)
+## What works today (v1.0)
 
 - **Real two-regime physics.** Step-integrated thrust / gravity / atmospheric drag
   during powered flight; exact analytic Keplerian orbits while coasting. The split
@@ -25,16 +25,20 @@ ascent autopilot, maneuver planning — shipped in the base game.
 - **Rocket configurator.** Design your vehicle: per-stage engine type **and count**
   (clusters), tank count + size, fins, add/remove stages. Live Δv / TWR (the
   "Kerbal Engineer" readouts, baked in). Presets + auto-saved to your browser.
-- **Ascent autopilot** — a gravity-turn "fly me to orbit" button ("MechJeb", baked in).
-- **Maneuver nodes** — plan a burn (prograde/radial) at a future point, see the
-  predicted orbit, warp to it, and auto-execute. The heart of orbital gameplay.
+- **Full flight control.** Ascent autopilot ("fly me to orbit"), **SAS** heading
+  hold (prograde / retrograde / radial / target / node), and an orbital map you
+  can zoom (scroll), pan (drag), and **right-click to target** any body or ship.
+- **Maneuver nodes.** Plan a burn — or a whole **queue** of chained burns — see
+  the predicted orbits, then ARM: the ship warps to each node and auto-burns it
+  *centred on the node*, tapering to a clean stop (no over-burn).
 - **A space program with stakes.** Milestones (reach orbit, land on Luna, …) award
-  funds + science and broadcast "★ first to …" to everyone. A live standings board.
-- **Live multiplayer.** One solar system, one universe clock, a shared roster, chat.
-  See each other's vessels on the map and in flight (rendezvous), smoothly
-  interpolated. Persisted across redeploys.
-- **Flight view** — auto-zooming side-on view; bodies are true-scale, so the world
-  fills the screen as ground on the pad and shrinks into a planet as you climb.
+  funds + science and broadcast "★ first to …" to everyone. A live standings board,
+  an objectives tracker, and a flight manual for new pilots.
+- **Multiplayer your way.** A public **Frontier** MMO everyone shares, or a private
+  room by code; your callsign + progress persist (rejoin). See each other's vessels
+  on the map and in flight (rendezvous), smoothly interpolated.
+- **AI co-pilot.** An MCP server (`mcp/`) lets an AI buddy read everyone's orbits
+  and coordinate the traffic from chat as Mission Control.
 
 ## Stack
 

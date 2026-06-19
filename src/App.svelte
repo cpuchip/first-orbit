@@ -7,7 +7,7 @@
   import { SYSTEM, ROOT, surfaceGravity, bodyPosition, bodyVelocity } from '../shared/bodies.ts'
   import { elementsToState } from '../shared/orbit.ts'
   import type { PlayerInfo, VesselState, ServerMsg } from '../shared/netproto.ts'
-  import { MILESTONES } from '../shared/milestones.ts'
+  import { MILESTONES, MILESTONE_ORDER } from '../shared/milestones.ts'
 
   const BUILD = __BUILD_SHA__
   const terra = SYSTEM[ROOT]
@@ -31,6 +31,13 @@
   let toasts = $state<{ id: number; text: string; color: string; first: boolean }[]>([])
   let toastSeq = 0
   let showBoard = $state(true)
+  let showHelp = $state(false)
+  const achieved = $derived(you?.achieved ?? [])
+  const nextObjective = $derived(MILESTONE_ORDER.find((k) => !achieved.includes(k)) ?? null)
+  function dismissHelp() {
+    showHelp = false
+    try { localStorage.setItem('fo-helped', '1') } catch { /* private mode */ }
+  }
 
   // Universe clock, anchored to the last server time we heard.
   let serverTime = 0
@@ -137,6 +144,7 @@
           game.launch(pendingVehicle, msg.vessel.id)
           screen = 'flight'
           view = 'flight'
+          try { if (!localStorage.getItem('fo-helped')) showHelp = true } catch { /* private mode */ }
         }
         break
       case 'chat':
@@ -231,6 +239,7 @@
     if (k === 'g') game.toggleAutopilot()
     if (k === 'm') view = view === 'map' ? 'flight' : 'map'
     if (k === 'p') showBoard = !showBoard
+    if (k === 'h' || k === '?') showHelp = !showHelp
     if (k === 'r') recover()
     if (k === '.') game.warp = Math.min(100000, game.warp * 10)
     if (k === ',') game.warp = Math.max(1, game.warp / 10)
@@ -366,10 +375,45 @@
         <div class="board-row" class:me={p.id === you?.id}>
           <span class="dot" style="background:{p.color}"></span>
           <span class="pname">{p.name}</span>
-          <span class="pbadges" title="milestones">{p.achieved.length}/6</span>
+          <span class="pbadges" title="milestones">{p.achieved.length}/{MILESTONE_ORDER.length}</span>
           <span class="psci">⚛{p.science}</span>
         </div>
       {/each}
+    </div>
+  {/if}
+
+  {#if screen === 'flight'}
+    <button class="help-btn" onclick={() => (showHelp = true)} title="Flight manual (H)">?</button>
+  {/if}
+
+  {#if showHelp}
+    <div class="overlay center help-overlay">
+      <div class="panel help">
+        <h2>Flight Manual</h2>
+        <div class="help-cols">
+          <div>
+            <h3>Fly</h3>
+            <p><b>W / S</b> throttle · <b>A / D</b> rotate · <b>Space</b> stage</p>
+            <p><b>G</b> autopilot to orbit · <b>, / .</b> time-warp</p>
+            <p><b>Q / E</b> SAS hold prograde / retrograde</p>
+            <p><b>R</b> recover (return to the assembly for funds)</p>
+          </div>
+          <div>
+            <h3>Navigate</h3>
+            <p><b>M</b> map ⇄ flight · scroll zoom · drag pan</p>
+            <p><b>Right-click</b> a body or ship on the map to target it</p>
+            <p><b>N</b> node · <b>I/K · J/L</b> tune · <b>B</b> arm → auto-burn</p>
+            <p><b>⇧N</b> add node · <b>[ / ]</b> cycle · <b>P</b> standings</p>
+          </div>
+        </div>
+        <h3>Missions</h3>
+        <div class="obj-list">
+          {#each MILESTONE_ORDER as k}
+            <span class="obj" class:done={achieved.includes(k)} title={MILESTONES[k].blurb}>{achieved.includes(k) ? '✓' : '○'} {MILESTONES[k].label}</span>
+          {/each}
+        </div>
+        <button onclick={dismissHelp}>Got it — to orbit ▸</button>
+      </div>
     </div>
   {/if}
 
@@ -448,7 +492,7 @@
   {#if screen === 'flight' && hud}
     <div class="hud">
       <div class="readouts panel">
-        <div class="body-name">▷ {hud.bodyName.toUpperCase()}</div>
+        <div class="body-name">▷ {hud.bodyName.toUpperCase()}{#if nextObjective}<span class="objective" title="next mission">◎ {MILESTONES[nextObjective].label}</span>{/if}</div>
         <div class="row big"><span>ALT</span><b>{km(hud.altitude)}</b></div>
         <div class="row big"><span>SPD</span><b>{fmt(hud.speed, ' m/s')}</b></div>
         <div class="row"><span>Apoapsis</span><b>{hud.apoapsisAlt === Infinity ? '—' : km(hud.apoapsisAlt)}</b></div>
@@ -574,6 +618,18 @@
   .orbit-flag { margin-top: 8px; color: #2ecc71; font-weight: 700; font-size: 13px; letter-spacing: 1px; }
   .orbit-flag.landed { color: #f1c40f; }
   .body-name { font-size: 12px; letter-spacing: 2px; color: #7fb0ff; margin-bottom: 4px; }
+  .objective { color: #2ecc71; letter-spacing: 0; margin-left: 8px; font-size: 11px; }
+  .help-btn { position: absolute; top: 14px; left: 210px; width: 30px; height: 30px; border-radius: 50%; background: rgba(12,16,26,0.82); border: 1px solid rgba(120,170,255,0.25); color: #7fb0ff; font-weight: 700; font-size: 15px; cursor: pointer; z-index: 6; }
+  .help-overlay { z-index: 20; background: rgba(5,6,10,0.55); }
+  .help { max-width: 560px; }
+  .help h2 { margin: 0 0 12px; font-size: 22px; }
+  .help h3 { color: #7fb0ff; font-size: 12px; letter-spacing: 1.5px; margin: 14px 0 6px; }
+  .help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .help-cols p { margin: 5px 0; color: #c8ccd2; font-size: 13px; line-height: 1.5; }
+  .help-cols b { color: #f1c40f; font-weight: 600; }
+  .obj-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 14px; }
+  .obj { color: #7a808a; font-size: 13px; }
+  .obj.done { color: #2ecc71; }
   .throttle { top: 14px; right: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .throttle .bar { width: 14px; height: 120px; background: #0c111c; border-radius: 7px; overflow: hidden; display: flex; align-items: flex-end; }
   .throttle .fill { width: 100%; background: linear-gradient(#2f6fed, #2ecc71); transition: height 0.05s linear; }
