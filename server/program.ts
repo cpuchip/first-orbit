@@ -8,9 +8,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
-import type { PlayerInfo, VesselState } from '../shared/netproto.ts'
+import type { PlayerInfo, VesselState, ContractState } from '../shared/netproto.ts'
 import { MILESTONES, RECOVERY_FUNDS, type MilestoneKind } from '../shared/milestones.ts'
 import { tierCost } from '../shared/tech.ts'
+import { CONTRACTS, contractDef, contractMet } from '../shared/contracts.ts'
+import { SYSTEM, ROOT } from '../shared/bodies.ts'
+import { apsides } from '../shared/orbit.ts'
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1']
 const MAX_VESSELS_PER_PLAYER = 12
@@ -27,6 +30,7 @@ interface Persisted {
   players: PlayerInfo[]
   vessels: VesselState[]
   firsts?: Record<string, string> // milestone kind -> player id who got there first
+  contracts?: Record<string, { playerId: string; name: string }>
 }
 
 export interface AwardResult {
@@ -41,6 +45,7 @@ export class Program {
   private players = new Map<string, PlayerInfo>()
   private vessels = new Map<string, VesselState>()
   private firsts = new Map<string, string>() // milestone kind -> first player id
+  private contractClaims = new Map<string, { playerId: string; name: string }>()
   private stateFile: string
   private dirty = false
 
@@ -51,6 +56,7 @@ export class Program {
     for (const p of loaded?.players ?? []) this.players.set(p.id, { ...p, achieved: p.achieved ?? [], tech: p.tech ?? 0 })
     for (const v of loaded?.vessels ?? []) if (validVessel(v)) this.vessels.set(v.id, v)
     for (const [k, v] of Object.entries(loaded?.firsts ?? {})) this.firsts.set(k, v)
+    for (const [k, v] of Object.entries(loaded?.contracts ?? {})) this.contractClaims.set(k, v)
     // Persist on a slow cadence; flushes are cheap and the file is small.
     setInterval(() => this.flush(), 5_000).unref?.()
   }
@@ -131,6 +137,33 @@ export class Program {
     this.dirty = true
   }
 
+  contractStates(): ContractState[] {
+    return CONTRACTS.map((c) => {
+      const cl = this.contractClaims.get(c.id)
+      return { id: c.id, claimedBy: cl?.playerId ?? null, claimedName: cl?.name ?? null }
+    })
+  }
+
+  private vesselMeets(v: VesselState, def: ReturnType<typeof contractDef>): boolean {
+    if (!def) return false
+    const body = SYSTEM[v.bodyId] ?? SYSTEM[ROOT]
+    const periAlt = v.orbit ? apsides(v.orbit).periapsis - body.radius : -Infinity
+    return contractMet(def, { bodyId: v.bodyId, inOrbit: v.status === 'orbit', periapsisAlt: periAlt, landed: v.status === 'landed' })
+  }
+
+  /** Claim a contract for a player — first come, and only if they really have a qualifying vessel. */
+  claimContract(playerId: string, contractId: string): { funds: number; science: number; name: string } | null {
+    const def = contractDef(contractId)
+    const p = this.players.get(playerId)
+    if (!def || !p || this.contractClaims.has(contractId)) return null
+    if (!this.allVessels().some((v) => v.owner === playerId && this.vesselMeets(v, def))) return null
+    this.contractClaims.set(contractId, { playerId, name: p.name })
+    p.funds += def.funds
+    p.science += def.science
+    this.dirty = true
+    return { funds: def.funds, science: def.science, name: p.name }
+  }
+
   /** Charge a player for a launch. Returns false (no vessel) if they can't afford it. */
   chargeLaunch(playerId: string, cost: number): boolean {
     const p = this.players.get(playerId)
@@ -197,6 +230,7 @@ export class Program {
       players: this.roster(),
       vessels: this.allVessels(),
       firsts: Object.fromEntries(this.firsts),
+      contracts: Object.fromEntries(this.contractClaims),
     }
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true })

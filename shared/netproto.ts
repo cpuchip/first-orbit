@@ -9,6 +9,12 @@
 import type { Elements } from './orbit.ts'
 import type { MilestoneKind } from './milestones.ts'
 
+export interface ContractState {
+  id: string
+  claimedBy: string | null // player id, or null if open
+  claimedName: string | null
+}
+
 export const SNAPSHOT_HZ = 10 // server -> client universe snapshots per second
 export const FLIGHT_HZ = 20 // client -> server active-flight updates per second
 export const PROTOCOL_VERSION = 1
@@ -46,13 +52,16 @@ export type ClientMsg =
   | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string }
   | { type: 'recover'; vesselId: string }
   | { type: 'milestone'; vesselId: string; kind: MilestoneKind }
+  | { type: 'claim_contract'; id: string }
   | { type: 'chat'; text: string }
   | { type: 'ping' }
 
 // ---- server -> client ----------------------------------------------------------
 export type ServerMsg =
-  | { type: 'welcome'; you: PlayerInfo; room: string; universeTime: number; players: PlayerInfo[]; vessels: VesselState[]; build: string }
+  | { type: 'welcome'; you: PlayerInfo; room: string; universeTime: number; players: PlayerInfo[]; vessels: VesselState[]; contracts: ContractState[]; build: string }
   | { type: 'players'; players: PlayerInfo[] }
+  | { type: 'contracts'; contracts: ContractState[] }
+  | { type: 'contract_claimed'; id: string; playerName: string; color: string; funds: number; science: number; ts: number }
   | { type: 'snapshot'; universeTime: number; vessels: VesselState[] }
   | { type: 'vesselCreated'; vessel: VesselState }
   | { type: 'achievement'; playerName: string; color: string; kind: MilestoneKind; funds: number; science: number; first: boolean; ts: number }

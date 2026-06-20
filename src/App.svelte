@@ -8,8 +8,9 @@
   import { tierCost, TIER_NAMES, MAX_TIER } from '../shared/tech.ts'
   import { SYSTEM, ROOT, surfaceGravity, bodyPosition, bodyVelocity } from '../shared/bodies.ts'
   import { elementsToState } from '../shared/orbit.ts'
-  import type { PlayerInfo, VesselState, ServerMsg } from '../shared/netproto.ts'
+  import type { PlayerInfo, VesselState, ServerMsg, ContractState } from '../shared/netproto.ts'
   import { MILESTONES, MILESTONE_ORDER } from '../shared/milestones.ts'
+  import { CONTRACTS, contractDef, contractMet } from '../shared/contracts.ts'
 
   const BUILD = __BUILD_SHA__
   const terra = SYSTEM[ROOT]
@@ -22,6 +23,8 @@
   let connected = $state(false)
   let players = $state<PlayerInfo[]>([])
   let vessels = $state<VesselState[]>([])
+  let contracts = $state<ContractState[]>([])
+  const claimAttempts = new Set<string>()
   let chat = $state<{ from: string; color: string; text: string }[]>([])
   let chatInput = $state('')
   let mapZoom = $state(1)
@@ -156,6 +159,7 @@
         vessels = msg.vessels
         you = msg.you
         currentRoom = msg.room
+        contracts = msg.contracts
         serverTime = msg.universeTime
         serverStamp = performanceNow()
         break
@@ -187,6 +191,14 @@
           try { if (!localStorage.getItem('fo-helped')) showHelp = true } catch { /* private mode */ }
         }
         break
+      case 'contracts':
+        contracts = msg.contracts
+        break
+      case 'contract_claimed': {
+        const def = contractDef(msg.id)
+        pushToast(`${msg.playerName} claimed “${def?.title ?? msg.id}” — +⬡${msg.funds.toLocaleString()} +⚛${msg.science}`, '#f1c40f')
+        break
+      }
       case 'chat':
         chat = [...chat.slice(-40), { from: msg.from, color: msg.color, text: msg.text }]
         break
@@ -342,6 +354,15 @@
         game.update(dt)
         hud = game.readout()
         nodeInfo = game.nodeReadout()
+        // Contract detection: claim any open contract this vessel now satisfies.
+        if (game.vesselId) {
+          const ctx = { bodyId: game.currentBody(), inOrbit: hud.inOrbit, periapsisAlt: hud.periapsisAlt, landed: hud.landed }
+          for (const c of contracts) {
+            if (c.claimedBy || claimAttempts.has(c.id)) continue
+            const def = contractDef(c.id)
+            if (def && contractMet(def, ctx)) { claimAttempts.add(c.id); net.send({ type: 'claim_contract', id: c.id }) }
+          }
+        }
         // Render the universe on the SHIP's clock (st.t), not the wall clock — so the
         // Moon (and everything) is drawn where its gravity actually is.
         if (view === 'map') {
@@ -571,6 +592,17 @@
           {:else}<span class="tech-cur">— all unlocked</span>{/if}
         </div>
 
+        <div class="contracts-panel">
+          <div class="cp-title">CONTRACTS — first to claim wins</div>
+          {#each CONTRACTS as c}
+            {@const st = contracts.find((s) => s.id === c.id)}
+            <div class="cp-row" class:claimed={!!st?.claimedBy}>
+              <span class="cp-name">{c.title}{st?.claimedBy ? ` ✓ ${st.claimedName}` : ''}</span>
+              <span class="cp-reward">⬡{(c.funds / 1000).toFixed(0)}k · ⚛{c.science}</span>
+            </div>
+          {/each}
+        </div>
+
         <input placeholder="Vehicle name" bind:value={design.name} maxlength="32" />
         <button onclick={launch} disabled={!buildable || !canAfford}>Roll out & Launch ▸ &nbsp; ⬡{vabCost.toLocaleString()}</button>
         <div class="roster">{players.length} engineer{players.length === 1 ? '' : 's'} on the program{connected ? '' : ' (connecting…)'}</div>
@@ -707,6 +739,12 @@
   .tech { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px 0 8px; font-size: 13px; color: #9aa0a6; flex-wrap: wrap; }
   .tech-cur b { color: #2ecc71; }
   button:disabled { opacity: 0.4; cursor: default; }
+  .contracts-panel { background: #0c111c; border: 1px solid #1c2331; border-radius: 8px; padding: 9px 11px; margin: 6px 0 10px; }
+  .cp-title { color: #c39bd3; font-size: 11px; letter-spacing: 1px; margin-bottom: 5px; }
+  .cp-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: #c8ccd2; padding: 2px 0; }
+  .cp-row.claimed { color: #5a606a; text-decoration: line-through; }
+  .cp-row.claimed .cp-reward { color: #5a606a; }
+  .cp-reward { color: #f1c40f; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .toasts { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 10; }
   .toast { background: rgba(12, 16, 26, 0.9); border: 1px solid rgba(120, 170, 255, 0.25); border-radius: 999px; padding: 7px 16px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); animation: pop 0.25s ease-out; }
   .toast.first { border-color: #f1c40f; box-shadow: 0 0 18px rgba(241,196,15,0.3); }

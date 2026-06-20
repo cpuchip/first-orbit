@@ -70,7 +70,7 @@ async function main() {
   check('snapshot includes the vessel', snap.vessels.some((v) => v.id === vid), `vessels=${snap.vessels.length}`)
 
   // Settle onto a circular Terra orbit and confirm the status propagates.
-  const r = SYSTEM[ROOT].radius + 90_000
+  const r = SYSTEM[ROOT].radius + 300_000 // a comsat-low-qualifying orbit
   const orbit = stateToElements({ x: r, y: 0 }, { y: circularSpeed(SYSTEM[ROOT].mu, r), x: 0 }, SYSTEM[ROOT].mu, welcome.universeTime)
   send(a, { type: 'settle', vesselId: vid, orbit, status: 'orbit', bodyId: ROOT })
   await wait(250)
@@ -122,6 +122,20 @@ async function main() {
   send(a, { type: 'launch', vesselName: 'Tooexpensive', bodyId: ROOT, cost: 99_999_999 })
   const err = await nextOfType(a, 'error', 1500).catch(() => null)
   check('unaffordable launch rejected', !!err && err.message.includes('funds'), err ? err.message : 'no error received')
+
+  // Contracts: Ada's 300 km orbit qualifies for comsat-low; she claims it.
+  send(a, { type: 'claim_contract', id: 'comsat-low' })
+  const claimed = await nextOfType(b, 'contract_claimed', 2000).catch(() => null)
+  check('contract claimed (qualifying vessel)', claimed?.id === 'comsat-low' && claimed.playerName === 'Ada' && claimed.funds > 0, `${claimed?.playerName} / ${claimed?.funds}`)
+  // Boyd has no qualifying vessel; his claim is rejected (the contract stays Ada's).
+  send(b, { type: 'claim_contract', id: 'comsat-low' })
+  await wait(200)
+  const e = await connect()
+  send(e, { type: 'hello', name: 'Evan', room: 'frontier', protocol: PROTOCOL_VERSION })
+  const we = await nextOfType(e, 'welcome')
+  const cs = we.contracts.find((x) => x.id === 'comsat-low')
+  check('contract is first-come (stays the claimant’s)', cs?.claimedName === 'Ada', `claimedBy=${cs?.claimedName}`)
+  e.close()
 
   a.close(); b.close(); c.close(); d.close()
   console.log(`\n${passed} passed, ${failures.length} failed`)

@@ -203,6 +203,7 @@ wss.on('connection', (ws) => {
           universeTime: prog.universeTime(),
           players: prog.roster(),
           vessels: prog.allVessels(),
+          contracts: prog.contractStates(),
           build: BUILD_SHA,
         })
         broadcastRoom(roomId, { type: 'players', players: prog.roster() })
@@ -255,6 +256,18 @@ wss.on('connection', (ws) => {
         const res = prog.awardMilestone(me.id, msg.kind)
         if (res?.newly) {
           broadcastRoom(client.room!, { type: 'achievement', playerName: me.name, color: me.color, kind: msg.kind, funds: res.funds, science: res.science, first: res.first, ts: Date.now() })
+          broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
+        }
+        break
+      }
+      case 'claim_contract': {
+        const prog = progOf(client)
+        const me = prog && client.playerId && prog.player(client.playerId)
+        if (!prog || !me) return
+        const res = prog.claimContract(me.id, msg.id)
+        if (res) {
+          broadcastRoom(client.room!, { type: 'contract_claimed', id: msg.id, playerName: res.name, color: me.color, funds: res.funds, science: res.science, ts: Date.now() })
+          broadcastRoom(client.room!, { type: 'contracts', contracts: prog.contractStates() })
           broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
         }
         break
