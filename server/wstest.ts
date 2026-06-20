@@ -61,7 +61,7 @@ async function main() {
   check('handshake -> welcome', !!welcome.you.id && welcome.players.length >= 1, `player=${welcome.you.name}`)
   check('welcome carries funds', welcome.you.funds > 0, `funds=${welcome.you.funds}`)
 
-  send(a, { type: 'launch', vesselName: 'Pathfinder I', bodyId: ROOT })
+  send(a, { type: 'launch', vesselName: 'Pathfinder I', bodyId: ROOT, cost: 0 })
   const created = await nextOfType(a, 'vesselCreated')
   check('launch -> vesselCreated', created.vessel.ownerName === 'Ada', `name=${created.vessel.name}`)
   const vid = created.vessel.id
@@ -117,6 +117,11 @@ async function main() {
     wd.room === 'private1' && !wd.vessels.some((v) => v.id === vid) && wd.players.every((p) => p.name !== 'Ada'),
     `room=${wd.room} vessels=${wd.vessels.length} players=${wd.players.map((p) => p.name).join(',')}`,
   )
+
+  // Economy: a launch you can't afford is rejected.
+  send(a, { type: 'launch', vesselName: 'Tooexpensive', bodyId: ROOT, cost: 99_999_999 })
+  const err = await nextOfType(a, 'error', 1500).catch(() => null)
+  check('unaffordable launch rejected', !!err && err.message.includes('funds'), err ? err.message : 'no error received')
 
   a.close(); b.close(); c.close(); d.close()
   console.log(`\n${passed} passed, ${failures.length} failed`)

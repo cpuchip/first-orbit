@@ -93,6 +93,11 @@ export function totalDeltaV(v: Vehicle): number {
   return performance(v).reduce((dv, s) => dv + s.deltaV, 0)
 }
 
+/** Total cost of the vehicle in funds. */
+export function vehicleCost(v: Vehicle): number {
+  return v.stages.reduce((c, s) => c + s.partIds.reduce((cc, id) => cc + part(id).cost, 0), 0)
+}
+
 /**
  * The reference rocket: a two-stage stack with ~4150 m/s of delta-v — enough to
  * reach Terra orbit with margin. Used by the smoke oracle and the tutorial.

@@ -3,7 +3,9 @@
   import { Net } from './net.ts'
   import { Game } from './game.ts'
   import { drawFlight, drawMap, mapScale, vesselWorldPos } from './render.ts'
-  import { referenceRocket, performance as stagePerformance, totalDeltaV, totalMass } from '../shared/vehicle.ts'
+  import { referenceRocket, performance as stagePerformance, totalDeltaV, totalMass, vehicleCost } from '../shared/vehicle.ts'
+  import { PARTS } from '../shared/parts.ts'
+  import { tierCost, TIER_NAMES, MAX_TIER } from '../shared/tech.ts'
   import { SYSTEM, ROOT, surfaceGravity, bodyPosition, bodyVelocity } from '../shared/bodies.ts'
   import { elementsToState } from '../shared/orbit.ts'
   import type { PlayerInfo, VesselState, ServerMsg } from '../shared/netproto.ts'
@@ -68,11 +70,11 @@
 
   // --- Vehicle Assembly: an editable, persisted rocket design ---------------
   type StageDesign = { engine: 'none' | 'main' | 'vac'; engineCount: number; tanks: number; tankSize: 'small' | 'large'; fins: boolean }
-  type Design = { name: string; stages: StageDesign[] }
+  type Design = { name: string; stages: StageDesign[]; crew?: 'pod' | 'lander'; parachute?: boolean; legs?: boolean }
   const PRESETS: Record<string, Design> = {
-    Sounding: { name: 'Sounding I', stages: [{ engine: 'main', engineCount: 1, tanks: 1, tankSize: 'small', fins: true }] },
-    Orbiter: { name: 'Pathfinder I', stages: [{ engine: 'main', engineCount: 1, tanks: 1, tankSize: 'large', fins: true }, { engine: 'vac', engineCount: 1, tanks: 1, tankSize: 'small', fins: false }] },
-    Munar: { name: 'Selene I', stages: [{ engine: 'main', engineCount: 3, tanks: 2, tankSize: 'large', fins: true }, { engine: 'main', engineCount: 1, tanks: 1, tankSize: 'large', fins: false }, { engine: 'vac', engineCount: 1, tanks: 2, tankSize: 'small', fins: false }] },
+    Sounding: { name: 'Sounding I', crew: 'pod', stages: [{ engine: 'main', engineCount: 1, tanks: 1, tankSize: 'small', fins: true }] },
+    Orbiter: { name: 'Pathfinder I', crew: 'pod', stages: [{ engine: 'main', engineCount: 1, tanks: 1, tankSize: 'large', fins: true }, { engine: 'vac', engineCount: 1, tanks: 1, tankSize: 'small', fins: false }] },
+    Munar: { name: 'Selene I', crew: 'lander', legs: true, parachute: true, stages: [{ engine: 'main', engineCount: 3, tanks: 2, tankSize: 'large', fins: true }, { engine: 'main', engineCount: 1, tanks: 1, tankSize: 'large', fins: false }, { engine: 'vac', engineCount: 1, tanks: 2, tankSize: 'small', fins: false }] },
   }
   const defaultDesign = (): Design => structuredClone(PRESETS.Orbiter)
   function loadDesign(): Design | null {
@@ -94,7 +96,11 @@
       for (let t = 0; t < s.tanks; t++) ids.push(s.tankSize === 'large' ? 'tank-large' : 'tank-small')
       if (s.fins) ids.push('fin', 'fin')
       if (i < d.stages.length - 1) ids.push('decoupler') // separates this stage from the one above
-      if (i === d.stages.length - 1) ids.push('cmd-pod') // crew pod rides the top stage
+      if (i === d.stages.length - 1) {
+        ids.push(d.crew === 'lander' ? 'lander' : 'cmd-pod') // crew module rides the top stage
+        if (d.parachute) ids.push('parachute')
+        if (d.legs) ids.push('leg', 'leg', 'leg')
+      }
       return { partIds: ids }
     })
     return { name: d.name || 'Unnamed', stages }
@@ -103,6 +109,18 @@
   let perf = $derived(stagePerformance(vehicle))
   let vabDv = $derived(Math.round(totalDeltaV(vehicle)))
   let vabMass = $derived((totalMass(vehicle) / 1000).toFixed(1))
+  let vabCost = $derived(vehicleCost(vehicle))
+  const youTech = $derived(you?.tech ?? 0)
+  const youFunds = $derived(you?.funds ?? 0)
+  const canAfford = $derived(youFunds >= vabCost)
+  // A design that uses parts above your tech tier can't be built.
+  const buildable = $derived(vehicle.stages.every((s) => s.partIds.every((id) => (PARTS[id].tier ?? 0) <= youTech)))
+  function unlockNextTier() {
+    if (youTech < MAX_TIER && (you?.science ?? 0) >= tierCost(youTech + 1)) net.send({ type: 'unlock_tech', tier: youTech + 1 })
+  }
+  const setCrew = (c: 'pod' | 'lander') => (design.crew = c)
+  const toggleParachute = () => (design.parachute = !design.parachute)
+  const toggleLegs = () => (design.legs = !design.legs)
   $effect(() => {
     try { localStorage.setItem('fo-design', JSON.stringify(design)) } catch { /* private mode */ }
   })
@@ -181,8 +199,10 @@
   }
 
   function launch() {
+    if (!buildable) return pushToast('This design uses parts you haven’t unlocked yet — see Tech.', '#e57373')
+    if (!canAfford) return pushToast(`Not enough funds — this rocket costs ⬡${vabCost.toLocaleString()}, you have ⬡${youFunds.toLocaleString()}.`, '#e57373')
     pendingVehicle = buildVehicle(design)
-    net.send({ type: 'launch', vesselName: design.name.trim() || 'Unnamed', bodyId: ROOT })
+    net.send({ type: 'launch', vesselName: design.name.trim() || 'Unnamed', bodyId: ROOT, cost: vabCost })
   }
 
   function recover() {
@@ -494,11 +514,30 @@
           {/each}
         </div>
         <button class="chip add" onclick={addStage} disabled={design.stages.length >= 5}>+ Add booster stage (bottom)</button>
-        <div class="totals"><span>Δv <b class:warn={vabDv < 3400}>{vabDv} m/s</b></span><span>Mass <b>{vabMass} t</b></span><span>Stages <b>{design.stages.length}</b></span></div>
+
+        <div class="stage crew-row">
+          <div class="stage-row">
+            <span class="lbl">Crew</span>
+            <button class="opt" class:sel={(design.crew ?? 'pod') === 'pod'} onclick={() => setCrew('pod')}>Pod</button>
+            <button class="opt" class:sel={design.crew === 'lander'} disabled={youTech < (PARTS['lander'].tier ?? 0)} onclick={() => setCrew('lander')}>Lander{youTech < 1 ? ' 🔒' : ''}</button>
+            <button class="opt" class:sel={design.parachute} disabled={youTech < (PARTS['parachute'].tier ?? 0)} onclick={toggleParachute}>Parachute{youTech < 1 ? ' 🔒' : ''}</button>
+            <button class="opt" class:sel={design.legs} disabled={youTech < (PARTS['leg'].tier ?? 0)} onclick={toggleLegs}>Legs{youTech < 1 ? ' 🔒' : ''}</button>
+          </div>
+        </div>
+
+        <div class="totals"><span>Δv <b class:warn={vabDv < 3400}>{vabDv} m/s</b></span><span>Mass <b>{vabMass} t</b></span><span>Cost <b class:warn={!canAfford}>⬡{vabCost.toLocaleString()}</b></span></div>
         <div class="hint">{vabDv < 3400 ? '⚠ ~3400 m/s needed to reach Terra orbit' : '✓ enough Δv for orbit — Luna wants ~5500+'}</div>
-        <div class="agency">Agency &nbsp; <b>⬡ {(you?.funds ?? 0).toLocaleString()}</b> funds &nbsp;·&nbsp; <b>⚛ {you?.science ?? 0}</b> science</div>
+
+        <div class="agency"><b class:warn={!canAfford}>⬡ {youFunds.toLocaleString()}</b> funds &nbsp;·&nbsp; <b>⚛ {you?.science ?? 0}</b> science</div>
+        <div class="tech">
+          <span class="tech-cur">Tech: <b>{TIER_NAMES[youTech]}</b></span>
+          {#if youTech < MAX_TIER}
+            <button class="chip" disabled={(you?.science ?? 0) < tierCost(youTech + 1)} onclick={unlockNextTier}>Unlock {TIER_NAMES[youTech + 1]} (⚛{tierCost(youTech + 1)})</button>
+          {:else}<span class="tech-cur">— all unlocked</span>{/if}
+        </div>
+
         <input placeholder="Vehicle name" bind:value={design.name} maxlength="32" />
-        <button onclick={launch}>Roll out & Launch ▸</button>
+        <button onclick={launch} disabled={!buildable || !canAfford}>Roll out & Launch ▸ &nbsp; ⬡{vabCost.toLocaleString()}</button>
         <div class="roster">{players.length} engineer{players.length === 1 ? '' : 's'} on the program{connected ? '' : ' (connecting…)'}</div>
       </div>
     </div>
@@ -628,6 +667,11 @@
   .roster { margin-top: 10px; color: #5a606a; font-size: 13px; text-align: center; }
   .agency { margin: 8px 0 2px; color: #9aa0a6; font-size: 14px; text-align: center; }
   .agency b { color: #f1c40f; }
+  .agency b.warn, .totals b.warn { color: #e57373; }
+  .crew-row { margin-top: 8px; }
+  .tech { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px 0 8px; font-size: 13px; color: #9aa0a6; flex-wrap: wrap; }
+  .tech-cur b { color: #2ecc71; }
+  button:disabled { opacity: 0.4; cursor: default; }
   .toasts { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; z-index: 10; }
   .toast { background: rgba(12, 16, 26, 0.9); border: 1px solid rgba(120, 170, 255, 0.25); border-radius: 999px; padding: 7px 16px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); animation: pop 0.25s ease-out; }
   .toast.first { border-color: #f1c40f; box-shadow: 0 0 18px rgba(241,196,15,0.3); }

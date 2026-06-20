@@ -10,6 +10,7 @@ import path from 'node:path'
 import { nanoid } from 'nanoid'
 import type { PlayerInfo, VesselState } from '../shared/netproto.ts'
 import { MILESTONES, RECOVERY_FUNDS, type MilestoneKind } from '../shared/milestones.ts'
+import { tierCost } from '../shared/tech.ts'
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1']
 const MAX_VESSELS_PER_PLAYER = 12
@@ -47,7 +48,7 @@ export class Program {
     this.stateFile = stateFile
     const loaded = this.load()
     this.startWall = loaded?.startWall ?? Date.now()
-    for (const p of loaded?.players ?? []) this.players.set(p.id, { ...p, achieved: p.achieved ?? [] })
+    for (const p of loaded?.players ?? []) this.players.set(p.id, { ...p, achieved: p.achieved ?? [], tech: p.tech ?? 0 })
     for (const v of loaded?.vessels ?? []) if (validVessel(v)) this.vessels.set(v.id, v)
     for (const [k, v] of Object.entries(loaded?.firsts ?? {})) this.firsts.set(k, v)
     // Persist on a slow cadence; flushes are cheap and the file is small.
@@ -70,6 +71,7 @@ export class Program {
       funds: 25_000,
       science: 0,
       achieved: [],
+      tech: 0,
     }
     this.players.set(info.id, info)
     this.dirty = true
@@ -127,6 +129,27 @@ export class Program {
     v.status = status
     if (bodyId) v.bodyId = bodyId
     this.dirty = true
+  }
+
+  /** Charge a player for a launch. Returns false (no vessel) if they can't afford it. */
+  chargeLaunch(playerId: string, cost: number): boolean {
+    const p = this.players.get(playerId)
+    if (!p || p.funds < cost) return false
+    p.funds -= Math.max(0, Math.floor(cost))
+    this.dirty = true
+    return true
+  }
+
+  /** Spend science to unlock the next tech tier. Returns true on success. */
+  unlockTech(playerId: string, tier: number): boolean {
+    const p = this.players.get(playerId)
+    if (!p || tier !== p.tech + 1) return false
+    const cost = tierCost(tier)
+    if (p.science < cost) return false
+    p.science -= cost
+    p.tech = tier
+    this.dirty = true
+    return true
   }
 
   /** Award a milestone to a player once. Returns whether it was new and if they were first. */

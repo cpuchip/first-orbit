@@ -212,8 +212,19 @@ wss.on('connection', (ws) => {
         const prog = progOf(client)
         const me = prog && client.playerId && prog.player(client.playerId)
         if (!prog || !me) return
+        if (!prog.chargeLaunch(me.id, msg.cost ?? 0)) {
+          send(ws, { type: 'error', message: 'insufficient funds' })
+          return
+        }
         const v = prog.createVessel(me, msg.vesselName, msg.bodyId || ROOT)
         broadcastRoom(client.room!, { type: 'vesselCreated', vessel: v })
+        broadcastRoom(client.room!, { type: 'players', players: prog.roster() }) // funds changed
+        break
+      }
+      case 'unlock_tech': {
+        const prog = progOf(client)
+        if (!prog || !client.playerId) return
+        if (prog.unlockTech(client.playerId, msg.tier)) broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
         break
       }
       case 'flight': {

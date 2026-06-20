@@ -34,12 +34,14 @@ export interface PlayerInfo {
   funds: number
   science: number
   achieved: MilestoneKind[]
+  tech: number // highest unlocked tech tier
 }
 
 // ---- client -> server ----------------------------------------------------------
 export type ClientMsg =
   | { type: 'hello'; name: string; room: string; protocol: number }
-  | { type: 'launch'; vesselName: string; bodyId: string }
+  | { type: 'launch'; vesselName: string; bodyId: string; cost: number }
+  | { type: 'unlock_tech'; tier: number }
   | { type: 'flight'; vesselId: string; x: number; y: number; vx: number; vy: number; heading: number; t: number }
   | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string }
   | { type: 'recover'; vesselId: string }
