@@ -20,7 +20,7 @@ import {
 import { referenceRocket, performance, totalDeltaV } from '../vehicle.ts'
 import { simulateToOrbit } from '../autopilot.ts'
 import { applyNode, nodeDeltaV } from '../maneuver.ts'
-import { planTransfer } from '../transfer.ts'
+import { planTransfer, bodyTarget, orbitTarget } from '../transfer.ts'
 import type { FlightWorld } from '../physics.ts'
 
 let passed = 0
@@ -209,7 +209,7 @@ console.log('First Orbit — smoke oracle\n')
   const luna = SYSTEM['luna']
   const r1 = terra.radius + 120_000
   const el = stateToElements(vec(r1, 0), vec(0, circularSpeed(mu, r1)), mu, 0)
-  const plan = planTransfer(el, SYSTEM, luna, 0)
+  const plan = planTransfer(el, bodyTarget(SYSTEM, luna)!, 0)
   check('transfer plan produced (TLI + capture)', !!plan && plan.nodes.length === 2)
   if (plan) {
     const tli = plan.nodes[0]
@@ -219,6 +219,27 @@ console.log('First Orbit — smoke oracle\n')
     const tArrive = tli.t + Math.PI * Math.sqrt(((r1 + luna.orbitRadius!) / 2) ** 3 / mu)
     const miss = len(sub(elementsToState(after, tArrive).pos, bodyPosition(SYSTEM, 'luna', tArrive)))
     check('vessel arrives inside Luna SOI (phase timing)', miss < luna.soi, `miss=${(miss / 1e6).toFixed(2)}Mm < soi=${(luna.soi / 1e6).toFixed(2)}Mm`)
+  }
+}
+
+// --- 10b. Generalized transfer: rendezvous with an orbiting object (junk) --------
+{
+  const r1 = terra.radius + 150_000
+  const el = stateToElements(vec(r1, 0), vec(0, circularSpeed(mu, r1)), mu, 0)
+  // A target in a higher circular Terra orbit, currently 1.2 rad ahead.
+  const rJunk = terra.radius + 1_400_000
+  const vJunk = circularSpeed(mu, rJunk)
+  const junkOrbit = stateToElements(vec(rJunk * Math.cos(1.2), rJunk * Math.sin(1.2)), vec(-vJunk * Math.sin(1.2), vJunk * Math.cos(1.2)), mu, 0)
+  const plan = planTransfer(el, orbitTarget('Junk', junkOrbit), 0)
+  check('rendezvous plan produced (single injection, no capture)', !!plan && plan.nodes.length === 1)
+  if (plan) {
+    const inj = plan.nodes[0]
+    const after = applyNode(el, inj)
+    check('injection raises apoapsis to the junk orbit', close(apsides(after).apoapsis, rJunk, 0.03), `apo=${(apsides(after).apoapsis / 1e3).toFixed(0)}k vs ${(rJunk / 1e3).toFixed(0)}k`)
+    // Phase timing: at arrival the vessel is right next to the junk.
+    const tArrive = inj.t + Math.PI * Math.sqrt(((r1 + rJunk) / 2) ** 3 / mu)
+    const miss = len(sub(elementsToState(after, tArrive).pos, elementsToState(junkOrbit, tArrive).pos))
+    check('vessel arrives next to the junk (phase timing)', miss < rJunk * 0.05, `miss=${(miss / 1e3).toFixed(0)} km`)
   }
 }
 

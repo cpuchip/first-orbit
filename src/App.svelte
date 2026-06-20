@@ -12,6 +12,7 @@
   import { MILESTONES, MILESTONE_ORDER } from '../shared/milestones.ts'
   import { CONTRACTS, contractDef, contractMet } from '../shared/contracts.ts'
   import { type DebrisDef, debrisState, debrisDef, SALVAGE_RANGE, SALVAGE_SPEED } from '../shared/debris.ts'
+  import { bodyTarget, orbitTarget } from '../shared/transfer.ts'
 
   const BUILD = __BUILD_SHA__
   const terra = SYSTEM[ROOT]
@@ -118,9 +119,22 @@
     else pipFlightZoom = Math.max(0.15, Math.min(12, pipFlightZoom * f))
   }
   function planTransfer() {
-    if (game.target?.kind !== 'body') return
-    const s = game.planTransferTo(game.target.id)
-    pushToast(s ?? `Get into a near-circular orbit around ${hud?.bodyName ?? 'the planet'} first, then plan the transfer.`, s ? '#2ecc71' : '#e57373')
+    const tk = game.target
+    if (!tk) return
+    let target = null
+    if (tk.kind === 'body') {
+      if (tk.id === game.currentBody()) return pushToast(`You’re already in ${SYSTEM[tk.id]?.name ?? 'this'} space.`, '#7fb0ff')
+      target = bodyTarget(SYSTEM, SYSTEM[tk.id])
+    } else if (tk.kind === 'debris') {
+      const d = debrisDef(tk.id)
+      if (d) target = orbitTarget(d.name, d.orbit)
+    } else if (tk.kind === 'vessel') {
+      const v = vessels.find((x) => x.id === tk.id)
+      if (v?.orbit && v.bodyId === ROOT) target = orbitTarget(v.name, v.orbit)
+    }
+    if (!target) return pushToast('Can’t plan a transfer to that target from here (try one in Terra orbit).', '#e57373')
+    const s = game.planTransferTo(target)
+    pushToast(s ?? `Get into a near-circular orbit first, then plan the transfer.`, s ? '#2ecc71' : '#e57373')
   }
   const salvageReady = $derived(
     hud?.targetKind === 'debris' && hud.targetDist != null && hud.targetDist <= SALVAGE_RANGE && (hud.targetRelSpeed ?? 1e9) <= SALVAGE_SPEED,
@@ -813,13 +827,18 @@
         <span>[M] {view === 'map' ? 'Flight' : 'Map'} · [R] Recover · [P] Standings</span>
       </div>
 
-      {#if hud.targetKind === 'body'}
-        <button class="transfer-btn panel" onclick={planTransfer} title="auto-plan a phase-timed transfer">⇆ Plan transfer to {hud.targetName}</button>
-      {/if}
+      <!-- One adaptive target action: salvage if you're matched-up with junk, else
+           plan a transfer/rendezvous to get there. -->
       {#if hud.targetKind === 'debris'}
-        <button class="transfer-btn salvage-btn panel" class:ready={salvageReady} disabled={!salvageReady} onclick={salvageTarget} title="rendezvous within {SALVAGE_RANGE / 1000} km and match velocity to salvage">
-          {salvageReady ? `⊕ Salvage ${hud.targetName}` : `Match velocity to salvage · ${hud.targetDist != null && hud.targetDist < 9999000 ? (hud.targetDist > 1000 ? (hud.targetDist / 1000).toFixed(1) + ' km' : Math.round(hud.targetDist) + ' m') : '—'} · ${Math.round(hud.targetRelSpeed ?? 0)} m/s`}
-        </button>
+        {#if salvageReady}
+          <button class="transfer-btn salvage-btn ready panel" onclick={salvageTarget}>⊕ Salvage {hud.targetName}</button>
+        {:else if hud.targetDist != null && hud.targetDist <= SALVAGE_RANGE}
+          <button class="transfer-btn salvage-btn panel" disabled>Match velocity to salvage · {Math.round(hud.targetRelSpeed ?? 0)} m/s</button>
+        {:else}
+          <button class="transfer-btn panel" onclick={planTransfer} title="plan a rendezvous to reach the junk">⇆ Plan transfer to {hud.targetName}</button>
+        {/if}
+      {:else if hud.targetKind}
+        <button class="transfer-btn panel" onclick={planTransfer} title="auto-plan a phase-timed transfer">⇆ Plan transfer to {hud.targetName}</button>
       {/if}
       {#if hud.inOrbit && !nodeInfo}
         <button class="circ-btn panel" onclick={circularize} title="plan and burn a circular orbit at the next apsis (C)">⊙ Circularize orbit</button>

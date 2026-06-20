@@ -20,7 +20,7 @@ import { osculating, currentBodyId } from '../shared/autopilot.ts'
 import { apsides, stateToElements, visViva, circularSpeed, elementsToState } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
 import { type ManeuverNode, applyNode, nodeDeltaV, nodeBurnDir } from '../shared/maneuver.ts'
-import { planTransfer } from '../shared/transfer.ts'
+import { planTransfer, type TransferTarget } from '../shared/transfer.ts'
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len, wrapAngle, TAU } from '../shared/units.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
 import { FLIGHT_HZ, type ClientMsg, type VesselState } from '../shared/netproto.ts'
@@ -322,11 +322,9 @@ export class Game {
     this.armNode() // auto-arm: warp to the burn and execute it
     return `Circularizing — ${Math.abs(Math.round(dv))} m/s ${dv >= 0 ? 'prograde' : 'retrograde'} at ${atApo ? 'apoapsis' : 'periapsis'} in ${Math.max(0, Math.round(dt / 60))} min. Warping to the burn…`
   }
-  /** Auto-plan a phase-timed transfer to a body, replacing the node queue. Returns a summary. */
-  planTransferTo(destId: string): string | null {
-    const dest = SYSTEM[destId]
-    if (!dest || destId === currentBodyId(this.world, this.st)) return null
-    const plan = planTransfer(this.elements(), SYSTEM, dest, this.st.t)
+  /** Auto-plan a phase-timed transfer to any target, replacing the node queue. Returns a summary. */
+  planTransferTo(target: TransferTarget): string | null {
+    const plan = planTransfer(this.elements(), target, this.st.t)
     if (!plan) return null
     this.nodes = plan.nodes
     this.editIdx = 0

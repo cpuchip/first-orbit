@@ -17,6 +17,30 @@ const ROOT_BODY = SYSTEM[ROOT]
 
 const DEBRIS_COLOR: Record<DebrisKind, string> = { booster: '#9aa0a6', probe: '#5dd5e8', cargo: '#e67e22', mystery: '#c39bd3' }
 
+/** A faint "ghost" of where a body will be at the active burn's time — KSP-style
+ *  encounter preview, so you can see your planned orbit meet the Moon (or junk). */
+function drawGhostMarker(ctx: CanvasRenderingContext2D, now: Vec2, future: Vec2, r: number, color: string, name: string): void {
+  ctx.save()
+  ctx.globalAlpha = 0.4
+  // thin link from where it is now to where it will be
+  ctx.strokeStyle = color
+  ctx.lineWidth = 0.8
+  ctx.setLineDash([2, 4])
+  ctx.beginPath()
+  ctx.moveTo(now.x, now.y)
+  ctx.lineTo(future.x, future.y)
+  ctx.stroke()
+  ctx.setLineDash([])
+  // hollow disk at the future position
+  ctx.beginPath()
+  ctx.arc(future.x, future.y, Math.max(4, r), 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.fillStyle = color
+  ctx.font = '9px system-ui, sans-serif'
+  ctx.fillText(`${name} ⟂`, future.x + Math.max(5, r) + 2, future.y + 3)
+  ctx.restore()
+}
+
 /** A small junk marker (rotated square). Mystery pieces glow. */
 function drawDebrisMarker(ctx: CanvasRenderingContext2D, sc: Vec2, dz: DebrisDef, label: boolean): void {
   const col = DEBRIS_COLOR[dz.kind]
@@ -404,6 +428,22 @@ export function drawMap(
       ctx.beginPath()
       ctx.arc(nsc.x, nsc.y, 9, 0, Math.PI * 2)
       ctx.stroke()
+    }
+  }
+
+  // Projection ghosts: where the bodies + junk will be when the ACTIVE node fires,
+  // so you can see your planned orbit meet them. Cycling nodes ([ / ]) moves the
+  // ghosts to that node's time — e.g. cycle to the capture node to see where the
+  // Moon will be when you arrive.
+  const activeNode = game.nodes[game.activeNodeIdx]
+  if (activeNode && activeNode.t > universeTime + 5) {
+    const tG = activeNode.t
+    for (const b of Object.values(SYSTEM) as Body[]) {
+      if (!b.parent) continue // the root body doesn't move
+      drawGhostMarker(ctx, toScreen(bodyPosition(SYSTEM, b.id, universeTime)), toScreen(bodyPosition(SYSTEM, b.id, tG)), b.radius * s, b.color, b.name)
+    }
+    for (const dz of debris) {
+      drawGhostMarker(ctx, toScreen(debrisState(dz, universeTime).pos), toScreen(debrisState(dz, tG).pos), 3, DEBRIS_COLOR[dz.kind], dz.name.split(' ')[0])
     }
   }
   }
