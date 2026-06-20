@@ -8,6 +8,7 @@
 import { Game } from './game.ts'
 import { apsides } from '../shared/orbit.ts'
 import { referenceRocket } from '../shared/vehicle.ts'
+import type { VesselState } from '../shared/netproto.ts'
 
 let passed = 0
 const failures: string[] = []
@@ -123,6 +124,31 @@ console.log('First Orbit — burn oracle\n')
     if (r.inOrbit && !r.autopilot && r.throttle === 0) { orbited = true; break }
   }
   check('autopilot reaches orbit even while warping', orbited, `peri above atmosphere=${g.readout().inOrbit}`)
+}
+
+// --- resume: re-pilot a coasting vessel after a reconnect ---------------------
+{
+  const g = new Game()
+  g.launch(referenceRocket(), 'orig')
+  if (!reachOrbit(g)) {
+    check('resume: reached orbit', false, 'autopilot failed')
+  } else {
+    const el = g.elements()
+    // The vessel as the server would have persisted it.
+    const vs: VesselState = {
+      id: 'resumed', owner: 'p', ownerName: 'P', name: 'Pathfinder', bodyId: 'terra', status: 'orbit',
+      orbit: el, vehicle: { stages: referenceRocket().stages }, fuel: g.st.fuel, stageIndex: g.st.stageIndex,
+    }
+    const g2 = new Game()
+    const ok = g2.resumeVessel(vs, g.st.t)
+    check('resume reconstructs a flyable craft on its orbit', ok && g2.vesselId === 'resumed' && rel(g2.elements().a, el.a) < 0.02 && g2.st.fuel === g.st.fuel, `a ${(g2.elements().a / 1e3).toFixed(0)}k vs ${(el.a / 1e3).toFixed(0)}k`)
+    // And it can still fly: a prograde burn raises the orbit.
+    const a0 = g2.elements().a
+    g2.throttle = 1
+    g2.st.heading = g2.elements().argPe // roughly prograde-ish; just confirm thrust changes the orbit
+    for (let i = 0; i < 200 && g2.st.fuel > 0; i++) g2.update(0.1)
+    check('resumed craft still burns fuel + flies', g2.st.fuel < g.st.fuel && rel(g2.elements().a, a0) > 0.001, `a ${(g2.elements().a / 1e3).toFixed(0)}k vs ${(a0 / 1e3).toFixed(0)}k`)
+  }
 }
 
 console.log(`\n${passed} passed, ${failures.length} failed`)

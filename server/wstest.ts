@@ -62,9 +62,10 @@ async function main() {
   check('handshake -> welcome', !!welcome.you.id && welcome.players.length >= 1, `player=${welcome.you.name}`)
   check('welcome carries funds', welcome.you.funds > 0, `funds=${welcome.you.funds}`)
 
-  send(a, { type: 'launch', vesselName: 'Pathfinder I', bodyId: ROOT, cost: 0 })
+  send(a, { type: 'launch', vesselName: 'Pathfinder I', bodyId: ROOT, cost: 0, vehicle: { stages: [{ partIds: ['engine-main', 'tank-large', 'cmd-pod'] }] } })
   const created = await nextOfType(a, 'vesselCreated')
   check('launch -> vesselCreated', created.vessel.ownerName === 'Ada', `name=${created.vessel.name}`)
+  check('vessel carries its vehicle (for resume)', !!created.vessel.vehicle && created.vessel.vehicle.stages.length === 1, `vehicle=${!!created.vessel.vehicle}`)
   const vid = created.vessel.id
 
   const snap = await nextOfType(a, 'snapshot')
@@ -73,17 +74,20 @@ async function main() {
   // Settle onto a circular Terra orbit and confirm the status propagates.
   const r = SYSTEM[ROOT].radius + 300_000 // a comsat-low-qualifying orbit
   const orbit = stateToElements({ x: r, y: 0 }, { y: circularSpeed(SYSTEM[ROOT].mu, r), x: 0 }, SYSTEM[ROOT].mu, welcome.universeTime)
-  send(a, { type: 'settle', vesselId: vid, orbit, status: 'orbit', bodyId: ROOT })
+  send(a, { type: 'settle', vesselId: vid, orbit, status: 'orbit', bodyId: ROOT, fuel: 1234, stageIndex: 0 })
   await wait(250)
   const snap2 = await nextOfType(a, 'snapshot')
   const mine = snap2.vessels.find((v) => v.id === vid)
   check('vessel settles into orbit', mine?.status === 'orbit' && !!mine?.orbit, `status=${mine?.status}`)
+  check('settle persists fuel + stage (for resume)', mine?.fuel === 1234 && mine?.stageIndex === 0, `fuel=${mine?.fuel} stage=${mine?.stageIndex}`)
 
   // A second player sees the first player's vessel (shared program).
   const b = await connect()
   send(b, { type: 'hello', name: 'Boyd', room: 'frontier', protocol: PROTOCOL_VERSION })
   const welcomeB = await nextOfType(b, 'welcome')
-  check('second player sees shared vessel', welcomeB.vessels.some((v) => v.id === vid), `vessels=${welcomeB.vessels.length}`)
+  const sharedV = welcomeB.vessels.find((v) => v.id === vid)
+  check('second player sees shared vessel', !!sharedV, `vessels=${welcomeB.vessels.length}`)
+  check('reconnect carries resume data (vehicle + fuel)', !!sharedV?.vehicle && sharedV?.fuel === 1234, `vehicle=${!!sharedV?.vehicle} fuel=${sharedV?.fuel}`)
 
   // Chat broadcast reaches the other client.
   send(a, { type: 'chat', text: 'liftoff in 3...' })

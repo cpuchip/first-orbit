@@ -32,6 +32,11 @@ export interface VesselState {
   orbit?: Elements
   /** Set while actively flown — last streamed flight snapshot. */
   flight?: { x: number; y: number; vx: number; vy: number; heading: number; t: number }
+  /** The rocket design, so the craft can be re-piloted after a reconnect. */
+  vehicle?: { stages: { partIds: string[] }[] }
+  /** Remaining propellant (kg) in the current stage + which stage — for resume. */
+  fuel?: number
+  stageIndex?: number
 }
 
 export interface PlayerInfo {
@@ -47,10 +52,10 @@ export interface PlayerInfo {
 // ---- client -> server ----------------------------------------------------------
 export type ClientMsg =
   | { type: 'hello'; name: string; room: string; protocol: number }
-  | { type: 'launch'; vesselName: string; bodyId: string; cost: number }
+  | { type: 'launch'; vesselName: string; bodyId: string; cost: number; vehicle?: { stages: { partIds: string[] }[] } }
   | { type: 'unlock_tech'; tier: number }
-  | { type: 'flight'; vesselId: string; x: number; y: number; vx: number; vy: number; heading: number; t: number }
-  | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string }
+  | { type: 'flight'; vesselId: string; x: number; y: number; vx: number; vy: number; heading: number; t: number; fuel?: number; stageIndex?: number }
+  | { type: 'settle'; vesselId: string; orbit: Elements; status: VesselState['status']; bodyId: string; fuel?: number; stageIndex?: number }
   | { type: 'recover'; vesselId: string }
   | { type: 'milestone'; vesselId: string; kind: MilestoneKind }
   | { type: 'claim_contract'; id: string }

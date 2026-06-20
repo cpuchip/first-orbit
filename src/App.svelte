@@ -72,6 +72,16 @@
     if (v.id === game.vesselId) { showFleet = false; recover(); return } // your active craft → back to the VAB
     net.send({ type: 'recover', vesselId: v.id }) // an abandoned craft → just bring it home for funds
   }
+  function flyVessel(v: VesselState) {
+    if (game.resumeVessel(v, universeTime())) {
+      view = 'flight'
+      screen = 'flight'
+      showFleet = false
+      pushToast(`Now flying ${v.name}.`, '#2ecc71')
+    } else {
+      pushToast('That craft can’t be re-piloted — it was built before resume existed.', '#e57373')
+    }
+  }
   const isPrivate = $derived(currentRoom !== 'frontier')
   function quitToMenu() {
     net.disconnect()
@@ -286,7 +296,7 @@
     if (!buildable) return pushToast('This design uses parts you haven’t unlocked yet — see Tech.', '#e57373')
     if (!canAfford) return pushToast(`Not enough funds — this rocket costs ⬡${vabCost.toLocaleString()}, you have ⬡${youFunds.toLocaleString()}.`, '#e57373')
     pendingVehicle = buildVehicle(design)
-    net.send({ type: 'launch', vesselName: design.name.trim() || 'Unnamed', bodyId: ROOT, cost: vabCost })
+    net.send({ type: 'launch', vesselName: design.name.trim() || 'Unnamed', bodyId: ROOT, cost: vabCost, vehicle: { stages: pendingVehicle.stages } })
   }
 
   function recover() {
@@ -618,6 +628,9 @@
                   <span class="fleet-sub">{fleetInfo(v)}</span>
                 </div>
                 <div class="fleet-actions">
+                  {#if v.vehicle && v.id !== game.vesselId && (v.status === 'orbit' || v.status === 'landed')}
+                    <button class="chip fly" onclick={() => flyVessel(v)} title="take control of this craft">▸ Fly</button>
+                  {/if}
                   <button class="chip" onclick={() => locate(v)} title="show it on the map">⊙ Locate</button>
                   <button class="chip" onclick={() => recoverVessel(v)} title="bring it home for funds">↩ Recover</button>
                 </div>
@@ -649,6 +662,9 @@
     <div class="overlay center">
       <div class="panel vab">
         <h2>Vehicle Assembly</h2>
+        {#if myFleet.length}
+          <button class="chip fleet-vab" onclick={() => (showFleet = true)} title="take control of a craft you already have in space">⊙ Your fleet — fly one of your {myFleet.length} craft already aloft</button>
+        {/if}
         <div class="presets">
           <span>Presets</span>
           <button class="chip" onclick={() => applyPreset('Sounding')}>Sounding</button>
@@ -909,6 +925,8 @@
   .fleet-name { color: #e6e9ee; font-weight: 600; font-size: 14px; }
   .fleet-sub { color: #8a909a; font-size: 12px; }
   .fleet-actions { display: flex; gap: 5px; flex-shrink: 0; }
+  .chip.fly { background: rgba(46,204,113,0.18); border-color: #2ecc71; color: #2ecc71; }
+  .fleet-vab { display: block; width: 100%; margin: 0 0 12px; background: rgba(127,176,255,0.12); border-color: #7fb0ff; color: #aecbff; padding: 9px; }
   .menu-overlay { z-index: 22; background: rgba(5,6,10,0.6); }
   .menu-panel { max-width: 360px; text-align: center; }
   .menu-panel h2 { margin: 0 0 2px; letter-spacing: 2px; }

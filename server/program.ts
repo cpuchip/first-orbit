@@ -100,7 +100,7 @@ export class Program {
     return this.players.get(id)
   }
 
-  createVessel(owner: PlayerInfo, vesselName: string, bodyId: string): VesselState {
+  createVessel(owner: PlayerInfo, vesselName: string, bodyId: string, vehicle?: VesselState['vehicle']): VesselState {
     // Cap abandoned vessels per player so a long-lived MMO room can't accrete junk.
     const mine = this.allVessels().filter((x) => x.owner === owner.id)
     if (mine.length >= MAX_VESSELS_PER_PLAYER) this.vessels.delete(mine[0].id)
@@ -111,6 +111,7 @@ export class Program {
       name: vesselName.trim().slice(0, 32) || 'Unnamed',
       bodyId,
       status: 'flight',
+      vehicle,
     }
     this.vessels.set(v.id, v)
     this.dirty = true
@@ -122,22 +123,28 @@ export class Program {
     vesselId: string,
     owner: string,
     f: { x: number; y: number; vx: number; vy: number; heading: number; t: number },
+    fuel?: number,
+    stageIndex?: number,
   ): void {
     const v = this.vessels.get(vesselId)
     if (!v || v.owner !== owner) return
     v.flight = f
     v.orbit = undefined
     v.status = 'flight'
+    if (fuel !== undefined) v.fuel = fuel
+    if (stageIndex !== undefined) v.stageIndex = stageIndex
   }
 
   /** Settle a vessel onto an authoritative analytic orbit when it stops burning. */
-  settle(vesselId: string, owner: string, orbit: VesselState['orbit'], status: VesselState['status'], bodyId: string): void {
+  settle(vesselId: string, owner: string, orbit: VesselState['orbit'], status: VesselState['status'], bodyId: string, fuel?: number, stageIndex?: number): void {
     const v = this.vessels.get(vesselId)
     if (!v || v.owner !== owner) return
     v.orbit = orbit
     v.flight = undefined
     v.status = status
     if (bodyId) v.bodyId = bodyId
+    if (fuel !== undefined) v.fuel = fuel
+    if (stageIndex !== undefined) v.stageIndex = stageIndex
     this.dirty = true
   }
 

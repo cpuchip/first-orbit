@@ -234,7 +234,7 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'error', message: 'insufficient funds' })
           return
         }
-        const v = prog.createVessel(me, msg.vesselName, msg.bodyId || ROOT)
+        const v = prog.createVessel(me, msg.vesselName, msg.bodyId || ROOT, msg.vehicle)
         broadcastRoom(client.room!, { type: 'vesselCreated', vessel: v })
         broadcastRoom(client.room!, { type: 'players', players: prog.roster() }) // funds changed
         break
@@ -250,13 +250,13 @@ wss.on('connection', (ws) => {
         if (!prog || !client.playerId) return
         prog.updateFlight(msg.vesselId, client.playerId, {
           x: msg.x, y: msg.y, vx: msg.vx, vy: msg.vy, heading: msg.heading, t: msg.t,
-        })
+        }, msg.fuel, msg.stageIndex)
         break
       }
       case 'settle': {
         const prog = progOf(client)
         if (!prog || !client.playerId) return
-        prog.settle(msg.vesselId, client.playerId, msg.orbit, msg.status, msg.bodyId)
+        prog.settle(msg.vesselId, client.playerId, msg.orbit, msg.status, msg.bodyId, msg.fuel, msg.stageIndex)
         break
       }
       case 'recover': {

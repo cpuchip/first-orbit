@@ -17,13 +17,13 @@ import {
   currentMass,
 } from '../shared/physics.ts'
 import { osculating, currentBodyId } from '../shared/autopilot.ts'
-import { apsides, stateToElements, visViva, circularSpeed } from '../shared/orbit.ts'
+import { apsides, stateToElements, visViva, circularSpeed, elementsToState } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
 import { type ManeuverNode, applyNode, nodeDeltaV, nodeBurnDir } from '../shared/maneuver.ts'
 import { planTransfer } from '../shared/transfer.ts'
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len, wrapAngle, TAU } from '../shared/units.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
-import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
+import { FLIGHT_HZ, type ClientMsg, type VesselState } from '../shared/netproto.ts'
 import type { MilestoneKind } from '../shared/milestones.ts'
 
 export type FlightPhase = 'prelaunch' | 'ascent' | 'coast' | 'circularize'
@@ -126,6 +126,43 @@ export class Game {
     this.targetVel = null
   }
 
+  /** Take control of an existing coasting vessel (after a reconnect) instead of launching anew. */
+  resumeVessel(v: VesselState, universeT: number): boolean {
+    if (!v.vehicle || !v.orbit) return false
+    this.stages = flightStages({ name: v.name, stages: v.vehicle.stages })
+    const local = elementsToState(v.orbit, universeT)
+    const bp = bodyPosition(SYSTEM, v.bodyId, universeT)
+    const bv = bodyVelocity(SYSTEM, v.bodyId, universeT)
+    const pos = add(local.pos, bp)
+    const vel = add(local.vel, bv)
+    const stageIndex = Math.max(0, Math.min(v.stageIndex ?? 0, this.stages.length - 1))
+    this.st = {
+      t: universeT,
+      pos,
+      vel,
+      heading: angleOf(vel),
+      throttle: 0,
+      stageIndex,
+      fuel: v.fuel ?? this.stages[stageIndex]?.fuel ?? 0,
+      landed: v.status === 'landed',
+    }
+    this.vesselId = v.id
+    this.throttle = 0
+    this.autopilot = false
+    this.warp = 1
+    this.apPhase = 'coast'
+    this.settled = false
+    this.wasInSpace = true
+    this.nodes = []
+    this.editIdx = 0
+    this.nodeArmed = false
+    this.executingNode = false
+    this.hold = 'off'
+    this.target = null
+    this.targetPos = null
+    this.targetVel = null
+    return true
+  }
   stageNow(): void {
     this.stageReq = true
   }
@@ -473,7 +510,7 @@ export class Game {
     if (this.st.landed && bodyId === 'terra' && this.wasInSpace && this.st.t > 5) fire('return')
     const settledStatus = this.st.landed ? 'landed' : stableOrbit ? 'orbit' : null
     if (settledStatus && !this.settled) {
-      this.send({ type: 'settle', vesselId: this.vesselId, orbit: el, status: settledStatus, bodyId })
+      this.send({ type: 'settle', vesselId: this.vesselId, orbit: el, status: settledStatus, bodyId, fuel: this.st.fuel, stageIndex: this.st.stageIndex })
       this.settled = true
     } else if (!settledStatus && this.netAccum >= 1 / FLIGHT_HZ) {
       this.settled = false
@@ -483,6 +520,7 @@ export class Game {
         x: this.st.pos.x, y: this.st.pos.y,
         vx: this.st.vel.x, vy: this.st.vel.y,
         heading: this.st.heading, t: this.st.t,
+        fuel: this.st.fuel, stageIndex: this.st.stageIndex,
       })
       this.netAccum = 0
     }
