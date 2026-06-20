@@ -14,6 +14,8 @@ import { Program } from './program.ts'
 import { SYSTEM, ROOT, bodyPosition } from '../shared/bodies.ts'
 import { elementsToState, apsides } from '../shared/orbit.ts'
 import { encode, decode, SNAPSHOT_HZ, PROTOCOL_VERSION, type ClientMsg, type ServerMsg, type VesselState } from '../shared/netproto.ts'
+import { contractDef } from '../shared/contracts.ts'
+import { MILESTONES } from '../shared/milestones.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(__dirname, '..', 'dist')
@@ -174,6 +176,19 @@ function broadcastRoom(roomId: string, msg: ServerMsg): void {
 }
 const progOf = (c: Client): Program | undefined => (c.room ? rooms.get(c.room) : undefined)
 
+// Mission Control — an ambient AI flight-director voice in the room's chat. (The
+// MCP server lets a real AI buddy take over this voice; this is the always-on
+// baseline so the room feels staffed even when no one's driving it.)
+const MC_TIPS = [
+  'press G for autopilot to orbit, then right-click a body and hit Plan transfer.',
+  'science buys tech — reach orbit and fly by Luna to unlock the lander and legs.',
+  'to come home, hold Retro (E) and burn until your periapsis dips into atmosphere.',
+  'contracts pay big — first to claim wins, so don’t dawdle.',
+]
+function missionControl(roomId: string, text: string): void {
+  broadcastRoom(roomId, { type: 'chat', from: 'Mission Control', color: '#7fb0ff', text, ts: Date.now() })
+}
+
 wss.on('connection', (ws) => {
   const client: Client = { ws }
   clients.add(client)
@@ -207,6 +222,7 @@ wss.on('connection', (ws) => {
           build: BUILD_SHA,
         })
         broadcastRoom(roomId, { type: 'players', players: prog.roster() })
+        send(ws, { type: 'chat', from: 'Mission Control', color: '#7fb0ff', text: `Welcome${roomId === 'frontier' ? ' to the Frontier' : ''}, ${you.name}. Tip: ${MC_TIPS[Math.floor(Math.random() * MC_TIPS.length)]}`, ts: Date.now() })
         break
       }
       case 'launch': {
@@ -257,6 +273,7 @@ wss.on('connection', (ws) => {
         if (res?.newly) {
           broadcastRoom(client.room!, { type: 'achievement', playerName: me.name, color: me.color, kind: msg.kind, funds: res.funds, science: res.science, first: res.first, ts: Date.now() })
           broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
+          if (res.first) missionControl(client.room!, `${me.name} is the first to ${MILESTONES[msg.kind].blurb}. The whole program salutes you.`)
         }
         break
       }
@@ -269,6 +286,7 @@ wss.on('connection', (ws) => {
           broadcastRoom(client.room!, { type: 'contract_claimed', id: msg.id, playerName: res.name, color: me.color, funds: res.funds, science: res.science, ts: Date.now() })
           broadcastRoom(client.room!, { type: 'contracts', contracts: prog.contractStates() })
           broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
+          missionControl(client.room!, `${res.name} claimed “${contractDef(msg.id)?.title ?? msg.id}” — outstanding flying.`)
         }
         break
       }

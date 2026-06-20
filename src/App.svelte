@@ -792,8 +792,8 @@
   .mc-hint { color: #6a707a; font-size: 11px; margin-left: 6px; }
   .row.tgt { color: #c39bd3; }
   .row.tgt b { color: #d2b4de; }
-  .transfer-btn { position: absolute; top: 252px; left: 14px; width: auto; padding: 8px 12px; background: rgba(12,16,26,0.82); border: 1px solid #c39bd3; color: #d2b4de; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 6; }
-  .sas { top: 296px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 188px; padding: 8px 10px; }
+  .transfer-btn { position: absolute; bottom: 296px; left: 14px; width: auto; padding: 8px 12px; background: rgba(12,16,26,0.82); border: 1px solid #c39bd3; color: #d2b4de; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 6; }
+  .sas { bottom: 186px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 200px; padding: 8px 10px; }
   .sas-title { width: 100%; color: #7fb0ff; font-size: 11px; letter-spacing: 1.5px; margin-bottom: 2px; }
   .sasb { width: auto; padding: 4px 8px; background: #161c28; color: #aeb4bc; font-size: 12px; font-weight: 600; }
   .sasb.on { background: #f1c40f; color: #05060a; }
