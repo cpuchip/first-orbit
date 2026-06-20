@@ -33,22 +33,35 @@ function loadedBodyImage(id: string): HTMLImageElement | null {
   return img.complete && img.naturalWidth > 0 ? img : null
 }
 
-/** Draw a body as its texture clipped to a circle, or a flat disk if the art isn't ready. */
-function drawBodyDisk(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, id: string, color: string): void {
+// Sun direction (world frame) — rotates slowly so bodies show a moving day/night
+// terminator. One cycle per Terra "day"; time-warp makes it visibly turn.
+const SUN_PERIOD = 21_549 // Terra sidereal day, s
+export function sunDir(t: number): Vec2 {
+  const a = (t / SUN_PERIOD) * Math.PI * 2
+  return { x: Math.cos(a), y: Math.sin(a) }
+}
+
+/** Draw a body as its texture clipped to a circle, with a day/night terminator. */
+function drawBodyDisk(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, id: string, color: string, sun?: Vec2): void {
   const img = r > 5 ? loadedBodyImage(id) : null
-  if (img) {
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(cx, cy, r, 0, Math.PI * 2)
-    ctx.clip()
-    ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2)
-    ctx.restore()
-  } else {
-    ctx.beginPath()
-    ctx.arc(cx, cy, r, 0, Math.PI * 2)
-    ctx.fillStyle = color
-    ctx.fill()
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.clip()
+  if (img) ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2)
+  else { ctx.fillStyle = color; ctx.fillRect(cx - r, cy - r, r * 2, r * 2) }
+  // Night side: a gradient from the sunlit edge (clear) to the far edge (dark).
+  if (sun && r > 3) {
+    const sx = sun.x, sy = -sun.y // world +y is up; screen +y is down
+    const grad = ctx.createLinearGradient(cx + sx * r, cy + sy * r, cx - sx * r, cy - sy * r)
+    grad.addColorStop(0, 'rgba(2,3,10,0)')
+    grad.addColorStop(0.52, 'rgba(2,3,10,0.12)')
+    grad.addColorStop(0.62, 'rgba(2,3,10,0.55)')
+    grad.addColorStop(1, 'rgba(2,3,10,0.86)')
+    ctx.fillStyle = grad
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
   }
+  ctx.restore()
 }
 
 function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, alpha: number): void {
@@ -129,7 +142,7 @@ export function drawFlight(
     const bc = toScreen(bodyPosition(SYSTEM, b.id, st.t))
     const br = b.radius * s
     if (br < 0.5 && Math.hypot(bc.x - w / 2, bc.y - h / 2) > Math.hypot(w, h)) continue
-    drawBodyDisk(ctx, bc.x, bc.y, br, b.id, b.color)
+    drawBodyDisk(ctx, bc.x, bc.y, br, b.id, b.color, sunDir(st.t))
     if (b.atmosphere) {
       ctx.beginPath()
       ctx.arc(bc.x, bc.y, (b.radius + b.atmosphere.height) * s, 0, Math.PI * 2)
@@ -271,7 +284,7 @@ export function drawMap(
       ctx.lineWidth = 1
       ctx.stroke()
     }
-    drawBodyDisk(ctx, sc.x, sc.y, Math.max(3, b.radius * s), b.id, b.color)
+    drawBodyDisk(ctx, sc.x, sc.y, Math.max(3, b.radius * s), b.id, b.color, sunDir(universeTime))
     // Sphere of influence (so you can see when you cross into a moon's pull).
     if (b.parent && b.soi) {
       ctx.beginPath()

@@ -35,6 +35,17 @@
   let toastSeq = 0
   let showBoard = $state(true)
   let showHelp = $state(false)
+  let showMenu = $state(false)
+  let paused = $state(false)
+  const isPrivate = $derived(currentRoom !== 'frontier')
+  function quitToMenu() {
+    net.disconnect()
+    game.vesselId = ''
+    paused = false
+    showMenu = false
+    connected = false
+    screen = 'menu'
+  }
   const achieved = $derived(you?.achieved ?? [])
   const nextObjective = $derived(MILESTONE_ORDER.find((k) => !achieved.includes(k)) ?? null)
   function dismissHelp() {
@@ -271,6 +282,7 @@
     if (k === 'm') view = view === 'map' ? 'flight' : 'map'
     if (k === 'p') showBoard = !showBoard
     if (k === 'h' || k === '?') showHelp = !showHelp
+    if (k === 'escape') showMenu = !showMenu
     if (k === 'r') recover()
     if (k === '.') game.warpUp()
     if (k === ',') game.warpDown()
@@ -318,6 +330,7 @@
       last = now
       resize()
       if (screen === 'flight') {
+        if (paused) { hud = game.readout(); nodeInfo = game.nodeReadout(); if (view === 'map') { if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }; drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter) } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, flightZoom); raf = requestAnimationFrame(frame); return }
         pollKeys(dt)
         // feed the target's live position/velocity to the game (or clear if it's gone).
         // Use the ship's own clock (st.t) so the target lines up with the bodies as drawn.
@@ -448,6 +461,28 @@
           {/each}
         </div>
         <button onclick={dismissHelp}>Got it — to orbit ▸</button>
+      </div>
+    </div>
+  {/if}
+
+  {#if paused && screen === 'flight' && !showMenu}
+    <div class="paused-banner">⏸ PAUSED — Esc for menu</div>
+  {/if}
+
+  {#if showMenu}
+    <div class="overlay center menu-overlay">
+      <div class="panel menu-panel">
+        <h2>{currentRoom === 'frontier' ? 'The Frontier' : currentRoom.toUpperCase()}</h2>
+        <p class="sub">{callsign} · ⬡{youFunds.toLocaleString()} funds · ⚛{you?.science ?? 0} science</p>
+        <button onclick={() => (showMenu = false)}>Resume ▸</button>
+        {#if isPrivate}
+          <button class="ghost" onclick={() => (paused = !paused)}>{paused ? '▶ Unpause' : '⏸ Pause'}</button>
+        {:else}
+          <div class="hint">Pause is off in the public Frontier — the shared universe keeps running.</div>
+        {/if}
+        <button class="ghost" onclick={() => { recover(); showMenu = false }}>↩ Recover &amp; return to Assembly</button>
+        <button class="ghost danger" onclick={quitToMenu}>✕ Quit to Menu</button>
+        <div class="hint">Your funds, science, and vessels are saved on the server — rejoin anytime.</div>
       </div>
     </div>
   {/if}
@@ -697,6 +732,12 @@
   .obj-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 14px; }
   .obj { color: #7a808a; font-size: 13px; }
   .obj.done { color: #2ecc71; }
+  .menu-overlay { z-index: 22; background: rgba(5,6,10,0.6); }
+  .menu-panel { max-width: 360px; text-align: center; }
+  .menu-panel h2 { margin: 0 0 2px; letter-spacing: 2px; }
+  .menu-panel .ghost { background: #1a2130; color: #c8ccd2; margin-top: 8px; }
+  .menu-panel .ghost.danger { background: #2a1c1c; color: #e57373; }
+  .paused-banner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 8; background: rgba(241,196,15,0.15); border: 1px solid #f1c40f; color: #f1c40f; padding: 6px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; }
   .throttle { top: 14px; right: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .throttle .bar { width: 14px; height: 120px; background: #0c111c; border-radius: 7px; overflow: hidden; display: flex; align-items: flex-end; }
   .throttle .fill { width: 100%; background: linear-gradient(#2f6fed, #2ecc71); transition: height 0.05s linear; }

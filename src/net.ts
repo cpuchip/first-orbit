@@ -64,6 +64,18 @@ export class Net {
   send(msg: ClientMsg): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(encode(msg))
   }
+
+  /** Close the connection and stop reconnecting (quit to menu). */
+  disconnect(): void {
+    const ws = this.ws
+    this.ws = undefined
+    this.connected = false
+    if (ws) {
+      ws.onclose = null
+      ws.onerror = null
+      ws.close()
+    }
+  }
 }
 
 export type { PlayerInfo, VesselState, ServerMsg }
