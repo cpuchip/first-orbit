@@ -39,6 +39,16 @@
     showHelp = false
     try { localStorage.setItem('fo-helped', '1') } catch { /* private mode */ }
   }
+  function pushToast(text: string, color = '#7fb0ff') {
+    const id = ++toastSeq
+    toasts = [...toasts, { id, text, color, first: false }]
+    setTimeout(() => { toasts = toasts.filter((t) => t.id !== id) }, 8000)
+  }
+  function planTransfer() {
+    if (game.target?.kind !== 'body') return
+    const s = game.planTransferTo(game.target.id)
+    pushToast(s ?? `Get into a near-circular orbit around ${hud?.bodyName ?? 'the planet'} first, then plan the transfer.`, s ? '#2ecc71' : '#e57373')
+  }
 
   // Universe clock, anchored to the last server time we heard.
   let serverTime = 0
@@ -525,13 +535,17 @@
         <span>[M] {view === 'map' ? 'Flight' : 'Map'} · [R] Recover · [P] Standings</span>
       </div>
 
+      {#if hud.targetKind === 'body'}
+        <button class="transfer-btn panel" onclick={planTransfer} title="auto-plan a phase-timed transfer">⇆ Plan transfer to {hud.targetName}</button>
+      {/if}
+
       <div class="sas panel">
         <div class="sas-title">SAS</div>
         <button class="sasb" class:on={hud.hold === 'prograde'} onclick={() => game.setHold('prograde')}>Pro</button>
         <button class="sasb" class:on={hud.hold === 'retrograde'} onclick={() => game.setHold('retrograde')}>Retro</button>
         <button class="sasb" class:on={hud.hold === 'radial-out'} onclick={() => game.setHold('radial-out')}>Rad+</button>
         <button class="sasb" class:on={hud.hold === 'radial-in'} onclick={() => game.setHold('radial-in')}>Rad−</button>
-        {#if game.node}<button class="sasb" class:on={hud.hold === 'node'} onclick={() => game.setHold('node')}>Node</button>{/if}
+        {#if nodeInfo}<button class="sasb" class:on={hud.hold === 'node'} onclick={() => game.setHold('node')}>Node</button>{/if}
         {#if hud.targetName}
           <button class="sasb tgt" class:on={hud.hold === 'target'} onclick={() => game.setHold('target')} title="point at target">◎</button>
           <button class="sasb tgt" class:on={hud.hold === 'tgt-prograde'} onclick={() => game.setHold('tgt-prograde')} title="toward target (relative velocity)">T▲</button>
@@ -655,7 +669,8 @@
   .mc-hint { color: #6a707a; font-size: 11px; margin-left: 6px; }
   .row.tgt { color: #c39bd3; }
   .row.tgt b { color: #d2b4de; }
-  .sas { top: 252px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 188px; padding: 8px 10px; }
+  .transfer-btn { position: absolute; top: 252px; left: 14px; width: auto; padding: 8px 12px; background: rgba(12,16,26,0.82); border: 1px solid #c39bd3; color: #d2b4de; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 6; }
+  .sas { top: 296px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 188px; padding: 8px 10px; }
   .sas-title { width: 100%; color: #7fb0ff; font-size: 11px; letter-spacing: 1.5px; margin-bottom: 2px; }
   .sasb { width: auto; padding: 4px 8px; background: #161c28; color: #aeb4bc; font-size: 12px; font-weight: 600; }
   .sasb.on { background: #f1c40f; color: #05060a; }

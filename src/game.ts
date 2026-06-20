@@ -20,6 +20,7 @@ import { osculating, currentBodyId } from '../shared/autopilot.ts'
 import { apsides, stateToElements } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
 import { type ManeuverNode, applyNode, nodeDeltaV, nodeBurnDir } from '../shared/maneuver.ts'
+import { planTransfer } from '../shared/transfer.ts'
 import { type Vec2, sub, add, scale, norm, dot, rotate, angleOf, len, wrapAngle, TAU } from '../shared/units.ts'
 import type { Vehicle } from '../shared/vehicle.ts'
 import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
@@ -51,6 +52,7 @@ export interface Readout {
   nodeArmed: boolean
   burning: boolean
   targetName: string | null
+  targetKind: 'vessel' | 'body' | null
   targetDist: number | null
   targetRelSpeed: number | null
 }
@@ -261,6 +263,19 @@ export class Game {
       this.armedChain = []
       if (this.hold === 'node') this.hold = 'off'
     }
+  }
+  /** Auto-plan a phase-timed transfer to a body, replacing the node queue. Returns a summary. */
+  planTransferTo(destId: string): string | null {
+    const dest = SYSTEM[destId]
+    if (!dest || destId === currentBodyId(this.world, this.st)) return null
+    const plan = planTransfer(this.elements(), SYSTEM, dest, this.st.t)
+    if (!plan) return null
+    this.nodes = plan.nodes
+    this.editIdx = 0
+    this.nodeArmed = false
+    this.executingNode = false
+    this.armedChain = []
+    return plan.summary
   }
   plannedElements(): Elements | null {
     const chain = this.plannedChain()
@@ -486,6 +501,7 @@ export class Game {
       nodeArmed: this.nodeArmed,
       burning: this.executingNode,
       targetName: this.target?.name ?? null,
+      targetKind: this.target?.kind ?? null,
       targetDist: this.targetPos ? len(sub(this.targetPos, this.st.pos)) : null,
       targetRelSpeed: this.targetPos && this.targetVel ? len(sub(this.st.vel, this.targetVel)) : null,
     }

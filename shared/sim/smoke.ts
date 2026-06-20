@@ -20,6 +20,7 @@ import {
 import { referenceRocket, performance, totalDeltaV } from '../vehicle.ts'
 import { simulateToOrbit } from '../autopilot.ts'
 import { applyNode, nodeDeltaV } from '../maneuver.ts'
+import { planTransfer } from '../transfer.ts'
 import type { FlightWorld } from '../physics.ts'
 
 let passed = 0
@@ -201,6 +202,24 @@ console.log('First Orbit — smoke oracle\n')
     circ.e < 0.005 && Math.abs(apsides(circ).periapsis - ra) < ra * 0.005,
     `e=${circ.e.toFixed(4)} dv=${nodeDeltaV(node).toFixed(0)} m/s`,
   )
+}
+
+// --- 10. Transfer planner: a phase-timed TLI actually arrives at Luna -----------
+{
+  const luna = SYSTEM['luna']
+  const r1 = terra.radius + 120_000
+  const el = stateToElements(vec(r1, 0), vec(0, circularSpeed(mu, r1)), mu, 0)
+  const plan = planTransfer(el, SYSTEM, luna, 0)
+  check('transfer plan produced (TLI + capture)', !!plan && plan.nodes.length === 2)
+  if (plan) {
+    const tli = plan.nodes[0]
+    const after = applyNode(el, tli)
+    check('TLI raises apoapsis to Luna orbit', close(apsides(after).apoapsis, luna.orbitRadius!, 0.02), `apo=${(apsides(after).apoapsis / 1e6).toFixed(2)}Mm`)
+    // The keystone: when the vessel reaches apoapsis, Luna is right there (within SOI).
+    const tArrive = tli.t + Math.PI * Math.sqrt(((r1 + luna.orbitRadius!) / 2) ** 3 / mu)
+    const miss = len(sub(elementsToState(after, tArrive).pos, bodyPosition(SYSTEM, 'luna', tArrive)))
+    check('vessel arrives inside Luna SOI (phase timing)', miss < luna.soi, `miss=${(miss / 1e6).toFixed(2)}Mm < soi=${(luna.soi / 1e6).toFixed(2)}Mm`)
+  }
 }
 
 // --- Summary --------------------------------------------------------------------
