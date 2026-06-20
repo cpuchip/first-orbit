@@ -7,7 +7,7 @@
   import { PARTS } from '../shared/parts.ts'
   import { tierCost, TIER_NAMES, MAX_TIER } from '../shared/tech.ts'
   import { SYSTEM, ROOT, surfaceGravity, bodyPosition, bodyVelocity } from '../shared/bodies.ts'
-  import { elementsToState } from '../shared/orbit.ts'
+  import { elementsToState, apsides } from '../shared/orbit.ts'
   import type { PlayerInfo, VesselState, ServerMsg, ContractState } from '../shared/netproto.ts'
   import { MILESTONES, MILESTONE_ORDER } from '../shared/milestones.ts'
   import { CONTRACTS, contractDef, contractMet } from '../shared/contracts.ts'
@@ -44,7 +44,34 @@
   let showBoard = $state(true)
   let showHelp = $state(false)
   let showMenu = $state(false)
+  let showFleet = $state(false)
   let paused = $state(false)
+  const myFleet = $derived(vessels.filter((v) => v.owner === you?.id))
+  function fleetInfo(v: VesselState): string {
+    const b = SYSTEM[v.bodyId] ?? SYSTEM[ROOT]
+    if (v.status === 'landed') return `landed on ${b.name}`
+    if (v.status === 'flight') return `in flight near ${b.name}`
+    if (v.orbit) {
+      const ap = apsides(v.orbit)
+      const pa = Math.round((ap.periapsis - b.radius) / 1000)
+      const aa = ap.apoapsis === Infinity ? '∞' : Math.round((ap.apoapsis - b.radius) / 1000)
+      return `${b.name} orbit · ${pa}×${aa} km`
+    }
+    return v.status
+  }
+  function locate(v: VesselState) {
+    const s = objectState('vessel', v.id, universeTime())
+    if (!s) return
+    view = 'map'
+    mapCenter = { x: s.pos.x, y: s.pos.y }
+    mapFollow = v.id === game.vesselId
+    mapZoom = v.bodyId === ROOT ? 18 : 40
+    showFleet = false
+  }
+  function recoverVessel(v: VesselState) {
+    if (v.id === game.vesselId) { showFleet = false; recover(); return } // your active craft → back to the VAB
+    net.send({ type: 'recover', vesselId: v.id }) // an abandoned craft → just bring it home for funds
+  }
   const isPrivate = $derived(currentRoom !== 'frontier')
   function quitToMenu() {
     net.disconnect()
@@ -328,7 +355,8 @@
     if (k === 'm') view = view === 'map' ? 'flight' : 'map'
     if (k === 'p') showBoard = !showBoard
     if (k === 'h' || k === '?') showHelp = !showHelp
-    if (k === 'escape') showMenu = !showMenu
+    if (k === 'f') showFleet = !showFleet
+    if (k === 'escape') { if (showFleet) showFleet = false; else showMenu = !showMenu }
     if (k === 'r') recover()
     if (k === '.') game.warpUp()
     if (k === ',') game.warpDown()
@@ -509,6 +537,7 @@
 
   {#if screen === 'flight'}
     <button class="help-btn" onclick={() => (showHelp = true)} title="Flight manual (H)">?</button>
+    <button class="fleet-btn" onclick={() => (showFleet = true)} title="Your fleet (F)">⊙ Fleet</button>
   {/if}
 
   {#if showHelp}
@@ -560,6 +589,36 @@
         <button class="ghost" onclick={() => { recover(); showMenu = false }}>↩ Recover &amp; return to Assembly</button>
         <button class="ghost danger" onclick={quitToMenu}>✕ Quit to Menu</button>
         <div class="hint">Your funds, science, and vessels are saved on the server — rejoin anytime.</div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showFleet}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="overlay center menu-overlay" onclick={() => (showFleet = false)}>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="panel fleet-panel" onclick={(e) => e.stopPropagation()}>
+        <h2>YOUR FLEET</h2>
+        <p class="sub">{myFleet.length} craft aloft · ⬡{youFunds.toLocaleString()} funds · ⚛{you?.science ?? 0}</p>
+        {#if myFleet.length === 0}
+          <div class="hint">No craft up yet — roll one out from the Assembly and reach for orbit.</div>
+        {:else}
+          <div class="fleet-list">
+            {#each myFleet as v (v.id)}
+              <div class="fleet-row">
+                <div class="fleet-meta">
+                  <span class="fleet-name">{v.name}{v.id === game.vesselId ? ' ◂ flying now' : ''}</span>
+                  <span class="fleet-sub">{fleetInfo(v)}</span>
+                </div>
+                <div class="fleet-actions">
+                  <button class="chip" onclick={() => locate(v)} title="show it on the map">⊙ Locate</button>
+                  <button class="chip" onclick={() => recoverVessel(v)} title="bring it home for funds">↩ Recover</button>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <button onclick={() => (showFleet = false)}>Close ▸</button>
       </div>
     </div>
   {/if}
@@ -831,6 +890,15 @@
   .obj-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 14px; }
   .obj { color: #7a808a; font-size: 13px; }
   .obj.done { color: #2ecc71; }
+  .fleet-btn { position: absolute; top: 14px; left: 252px; z-index: 8; padding: 6px 12px; background: rgba(12,16,26,0.82); border: 1px solid #2a3344; color: #9fb4d8; font-size: 13px; cursor: pointer; border-radius: 6px; }
+  .fleet-panel { max-width: 440px; width: 92%; text-align: center; }
+  .fleet-panel h2 { margin: 0 0 2px; letter-spacing: 2px; }
+  .fleet-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; max-height: 46vh; overflow-y: auto; }
+  .fleet-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #0c111c; border: 1px solid #1c2331; border-radius: 8px; padding: 8px 11px; text-align: left; }
+  .fleet-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .fleet-name { color: #e6e9ee; font-weight: 600; font-size: 14px; }
+  .fleet-sub { color: #8a909a; font-size: 12px; }
+  .fleet-actions { display: flex; gap: 5px; flex-shrink: 0; }
   .menu-overlay { z-index: 22; background: rgba(5,6,10,0.6); }
   .menu-panel { max-width: 360px; text-align: center; }
   .menu-panel h2 { margin: 0 0 2px; letter-spacing: 2px; }

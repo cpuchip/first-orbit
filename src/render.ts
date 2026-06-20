@@ -169,13 +169,29 @@ export function drawFlight(
     const br = b.radius * s
     if (br < 0.5 && Math.hypot(bc.x - w / 2, bc.y - h / 2) > Math.hypot(w, h)) continue
     drawBodyDisk(ctx, bc.x, bc.y, br, b.id, b.color, sunDir(st.t))
-    if (b.atmosphere) {
+    if (b.atmosphere && br > 2) {
+      // Atmosphere as a soft glowing limb, not a thin ring — the home world reads
+      // as a living planet on launch and from orbit.
+      const inner = b.radius * s
+      const outer = (b.radius + b.atmosphere.height) * s
+      const glow = ctx.createRadialGradient(bc.x, bc.y, inner, bc.x, bc.y, outer)
+      glow.addColorStop(0, 'rgba(120,170,255,0)')
+      glow.addColorStop(0.7, 'rgba(120,170,255,0.08)')
+      glow.addColorStop(0.93, 'rgba(150,195,255,0.30)')
+      glow.addColorStop(1, 'rgba(120,170,255,0)')
+      ctx.fillStyle = glow
       ctx.beginPath()
-      ctx.arc(bc.x, bc.y, (b.radius + b.atmosphere.height) * s, 0, Math.PI * 2)
-      ctx.strokeStyle = 'rgba(120,170,255,0.25)'
-      ctx.lineWidth = 1
-      ctx.stroke()
+      ctx.arc(bc.x, bc.y, outer, 0, Math.PI * 2)
+      ctx.fill()
     }
+  }
+
+  // The launch pad on the ground at the home site.
+  if (r.landed && alt < 3000) {
+    const pad = loadedBodyImage('launchpad')
+    const base = toScreen(st.pos)
+    const pw = Math.max(64, 90 * s)
+    if (pad) ctx.drawImage(pad, base.x - pw / 2, base.y - pw * 0.06, pw, pw * 0.7)
   }
 
   // Other players nearby — rendezvous presence.
