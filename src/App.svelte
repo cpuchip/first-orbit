@@ -60,7 +60,7 @@
     return v.status
   }
   function locate(v: VesselState) {
-    const s = objectState('vessel', v.id, universeTime())
+    const s = objectState('vessel', v.id, game.st.t)
     if (!s) return
     view = 'map'
     mapCenter = { x: s.pos.x, y: s.pos.y }
@@ -109,6 +109,12 @@
   )
   function salvageTarget() {
     if (game.target?.kind === 'debris' && salvageReady) net.send({ type: 'salvage', id: game.target.id })
+  }
+  function circularize() {
+    const s = game.planCircularize()
+    if (s === 'already') pushToast('That orbit is already circular.', '#7fb0ff')
+    else if (s) pushToast(s, '#2ecc71')
+    else pushToast('Get into a stable orbit first — reach apoapsis above the atmosphere.', '#e57373')
   }
 
   // Universe clock, anchored to the last server time we heard.
@@ -311,7 +317,7 @@
     const rect = canvas.getBoundingClientRect()
     const sx = clientX - rect.left
     const sy = clientY - rect.top
-    const t = universeTime()
+    const t = game.st.t // match the render clock (the map draws on the ship's clock, not wall time)
     const s = mapScale(canvas.width, canvas.height, mapZoom)
     const toScreen = (p: { x: number; y: number }) => ({ x: canvas.width / 2 + (p.x - mapCenter.x) * s, y: canvas.height / 2 - (p.y - mapCenter.y) * s })
     let best: { kind: 'vessel' | 'body' | 'debris'; id: string; name: string } | null = null
@@ -356,6 +362,7 @@
     if (k === 'p') showBoard = !showBoard
     if (k === 'h' || k === '?') showHelp = !showHelp
     if (k === 'f') showFleet = !showFleet
+    if (k === 'c') circularize()
     if (k === 'escape') { if (showFleet) showFleet = false; else showMenu = !showMenu }
     if (k === 'r') recover()
     if (k === '.') game.warpUp()
@@ -764,6 +771,9 @@
           {salvageReady ? `⊕ Salvage ${hud.targetName}` : `Match velocity to salvage · ${hud.targetDist != null && hud.targetDist < 9999000 ? (hud.targetDist > 1000 ? (hud.targetDist / 1000).toFixed(1) + ' km' : Math.round(hud.targetDist) + ' m') : '—'} · ${Math.round(hud.targetRelSpeed ?? 0)} m/s`}
         </button>
       {/if}
+      {#if hud.inOrbit && !nodeInfo}
+        <button class="circ-btn panel" onclick={circularize} title="plan and burn a circular orbit at the next apsis (C)">⊙ Circularize orbit</button>
+      {/if}
 
       <div class="sas panel">
         <div class="sas-title">SAS</div>
@@ -927,6 +937,7 @@
   .row.tgt { color: #c39bd3; }
   .row.tgt b { color: #d2b4de; }
   .transfer-btn { position: absolute; bottom: 296px; left: 14px; width: auto; padding: 8px 12px; background: rgba(12,16,26,0.82); border: 1px solid #c39bd3; color: #d2b4de; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 6; }
+  .circ-btn { position: absolute; bottom: 344px; left: 14px; width: auto; padding: 8px 12px; background: rgba(12,16,26,0.82); border: 1px solid #2ecc71; color: #2ecc71; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 6; }
   .salvage-btn { border-color: #c39bd3; color: #d9b8e6; max-width: 230px; text-align: left; line-height: 1.25; }
   .salvage-btn.ready { border-color: #2ecc71; color: #2ecc71; background: rgba(46,204,113,0.12); }
   .sas { bottom: 186px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 200px; padding: 8px 10px; }

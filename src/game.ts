@@ -17,7 +17,7 @@ import {
   currentMass,
 } from '../shared/physics.ts'
 import { osculating, currentBodyId } from '../shared/autopilot.ts'
-import { apsides, stateToElements } from '../shared/orbit.ts'
+import { apsides, stateToElements, visViva, circularSpeed } from '../shared/orbit.ts'
 import { propagate, type Elements } from '../shared/orbit.ts'
 import { type ManeuverNode, applyNode, nodeDeltaV, nodeBurnDir } from '../shared/maneuver.ts'
 import { planTransfer } from '../shared/transfer.ts'
@@ -264,6 +264,27 @@ export class Game {
       if (this.hold === 'node') this.hold = 'off'
     }
   }
+  /** Plan (and arm) a circularization burn at the next apsis — one-tap round orbit, any body. */
+  planCircularize(): string | null {
+    const el = this.elements()
+    if (el.e >= 1) return null // hyperbolic — nothing to circularize
+    if (el.e < 0.012) return 'already' // round enough already
+    const n = Math.sqrt(el.mu / el.a ** 3)
+    const frac = (x: number) => ((x % TAU) + TAU) % TAU
+    const mNow = frac(el.M0 + n * (this.st.t - el.t0))
+    const dtPeri = frac(0 - mNow) / n
+    const dtApo = frac(Math.PI - mNow) / n
+    const atApo = dtApo <= dtPeri
+    const dt = atApo ? dtApo : dtPeri
+    const r = atApo ? el.a * (1 + el.e) : el.a * (1 - el.e)
+    const dv = circularSpeed(el.mu, r) - visViva(el.mu, r, el.a) // + at apoapsis, − at periapsis
+    this.nodes = [{ t: this.st.t + Math.max(2, dt), prograde: dv, radial: 0 }]
+    this.editIdx = 0
+    this.executingNode = false
+    this.armedChain = []
+    this.armNode() // auto-arm: warp to the burn and execute it
+    return `Circularizing — ${Math.abs(Math.round(dv))} m/s ${dv >= 0 ? 'prograde' : 'retrograde'} at ${atApo ? 'apoapsis' : 'periapsis'} in ${Math.max(0, Math.round(dt / 60))} min. Warping to the burn…`
+  }
   /** Auto-plan a phase-timed transfer to a body, replacing the node queue. Returns a summary. */
   planTransferTo(destId: string): string | null {
     const dest = SYSTEM[destId]
@@ -366,9 +387,12 @@ export class Game {
         this.st.heading = this.prograde()
         if (alt >= ATMO && vSpeed < 40) this.apPhase = 'circularize'
       } else {
-        this.throttle = 1
+        // Circularize at apoapsis: raise periapsis to a comfortably round, stable
+        // orbit well clear of the atmosphere. Taper as it rounds out to avoid
+        // overshoot. (The Circularize button perfects it to ~0 eccentricity.)
         this.st.heading = this.prograde()
-        if (periapsis >= ROOT_BODY.radius + ATMO + 2000) {
+        this.throttle = Math.max(0.12, Math.min(1, el.e * 10))
+        if (periapsis >= ROOT_BODY.radius + ATMO + 12_000 || periapsis >= apoapsis - 2000) {
           this.autopilot = false
           this.throttle = 0
         }

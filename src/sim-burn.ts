@@ -84,6 +84,47 @@ console.log('First Orbit — burn oracle\n')
   }
 }
 
+// --- auto-circularize rounds an eccentric orbit -------------------------------
+{
+  const g = new Game()
+  g.launch(referenceRocket(), 'circ')
+  if (!reachOrbit(g)) {
+    check('circularize: reached orbit', false, 'autopilot failed')
+  } else {
+    check('autopilot leaves a near-circular orbit', g.elements().e < 0.06, `e=${g.elements().e.toFixed(3)}`)
+    // Kick prograde to make the orbit eccentric (gentle, so leftover fuel can undo it).
+    g.toggleNode()
+    g.adjustNode(80, 0)
+    g.armNode()
+    for (let i = 0; i < 500_000 && g.node; i++) g.update(0.1)
+    const ecc = g.elements().e
+    check('orbit made eccentric', ecc > 0.03, `e=${ecc.toFixed(3)}`)
+
+    // One tap: plan + arm a circularization at the next apsis. It should drive the
+    // eccentricity back down sharply (toward round) at the right moment.
+    const msg = g.planCircularize()
+    check('circularize planned + armed', typeof msg === 'string' && msg !== 'already' && g.nodeReadout()?.armed === true, `msg=${msg}`)
+    for (let i = 0; i < 800_000 && g.nodes.length; i++) g.update(0.1)
+    const eAfter = g.elements().e
+    check('orbit circularized (eccentricity collapses)', eAfter < 0.03 && eAfter < ecc * 0.5, `e ${eAfter.toFixed(3)} (was ${ecc.toFixed(3)})`)
+  }
+}
+
+// --- autopilot survives the player time-warping during ascent -----------------
+{
+  const g = new Game()
+  g.launch(referenceRocket(), 'warp')
+  g.toggleAutopilot()
+  let orbited = false
+  for (let i = 0; i < 300_000; i++) {
+    g.warp = 8 // the player cranks warp while the autopilot flies
+    g.update(0.1)
+    const r = g.readout()
+    if (r.inOrbit && !r.autopilot && r.throttle === 0) { orbited = true; break }
+  }
+  check('autopilot reaches orbit even while warping', orbited, `peri above atmosphere=${g.readout().inOrbit}`)
+}
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.log(`  - ${f}`); process.exit(1) }
 console.log('burn oracle green ✓')
