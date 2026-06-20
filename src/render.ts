@@ -11,8 +11,33 @@ import { nodeState } from '../shared/maneuver.ts'
 import { type Vec2, vec, add, scale, fromAngle, len } from '../shared/units.ts'
 import type { Game } from './game.ts'
 import type { VesselState, PlayerInfo } from '../shared/netproto.ts'
+import { type DebrisDef, type DebrisKind, debrisState } from '../shared/debris.ts'
 
 const ROOT_BODY = SYSTEM[ROOT]
+
+const DEBRIS_COLOR: Record<DebrisKind, string> = { booster: '#9aa0a6', probe: '#5dd5e8', cargo: '#e67e22', mystery: '#c39bd3' }
+
+/** A small junk marker (rotated square). Mystery pieces glow. */
+function drawDebrisMarker(ctx: CanvasRenderingContext2D, sc: Vec2, dz: DebrisDef, label: boolean): void {
+  const col = DEBRIS_COLOR[dz.kind]
+  ctx.save()
+  ctx.strokeStyle = col
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(sc.x, sc.y - 5)
+  ctx.lineTo(sc.x + 5, sc.y)
+  ctx.lineTo(sc.x, sc.y + 5)
+  ctx.lineTo(sc.x - 5, sc.y)
+  ctx.closePath()
+  ctx.stroke()
+  if (dz.kind === 'mystery') { ctx.fillStyle = 'rgba(195,155,211,0.35)'; ctx.fill() }
+  if (label) {
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'
+    ctx.font = '9px system-ui, sans-serif'
+    ctx.fillText(dz.name, sc.x + 8, sc.y + 3)
+  }
+  ctx.restore()
+}
 
 // A fixed starfield (screen-space parallax-free is fine for this scale).
 const STARS = Array.from({ length: 220 }, () => ({
@@ -113,6 +138,7 @@ export function drawFlight(
   players: PlayerInfo[] = [],
   universeTime = 0,
   zoom = 1,
+  debris: DebrisDef[] = [],
 ): void {
   const st = game.st
   const r = game.readout()
@@ -171,6 +197,13 @@ export function drawFlight(
     ctx.fillStyle = 'rgba(255,255,255,0.75)'
     ctx.font = '10px system-ui, sans-serif'
     ctx.fillText(`${v.name} · ${v.ownerName}`, sc.x + 8, sc.y)
+  }
+
+  // Salvageable junk drifting nearby.
+  for (const dz of debris) {
+    const sc = toScreen(debrisState(dz, st.t).pos)
+    if (sc.x < -30 || sc.x > w + 30 || sc.y < -30 || sc.y > h + 30) continue
+    drawDebrisMarker(ctx, sc, dz, s > 0.0005)
   }
 
   drawVessel(ctx, toScreen(st.pos), st.heading, s, r.throttle, r.fuel > 0)
@@ -261,6 +294,7 @@ export function drawMap(
   universeTime: number,
   zoom: number,
   center: Vec2 = vec(0, 0),
+  debris: DebrisDef[] = [],
 ): void {
   ctx.fillStyle = '#05060a'
   ctx.fillRect(0, 0, w, h)
@@ -365,6 +399,11 @@ export function drawMap(
     ctx.fillStyle = 'rgba(255,255,255,0.65)'
     ctx.font = '10px system-ui, sans-serif'
     ctx.fillText(`${v.name} · ${v.ownerName}`, sc.x + 7, sc.y - 6)
+  }
+
+  // Space junk drifting in orbit — the salvage opportunities.
+  for (const dz of debris) {
+    drawDebrisMarker(ctx, toScreen(debrisState(dz, universeTime).pos), dz, zoom > 0.5)
   }
 
   // Our own vessel — drawn from the live local state (most accurate).

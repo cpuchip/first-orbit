@@ -11,6 +11,7 @@
   import type { PlayerInfo, VesselState, ServerMsg, ContractState } from '../shared/netproto.ts'
   import { MILESTONES, MILESTONE_ORDER } from '../shared/milestones.ts'
   import { CONTRACTS, contractDef, contractMet } from '../shared/contracts.ts'
+  import { type DebrisDef, debrisState, debrisDef, SALVAGE_RANGE, SALVAGE_SPEED } from '../shared/debris.ts'
 
   const BUILD = __BUILD_SHA__
   const terra = SYSTEM[ROOT]
@@ -24,6 +25,7 @@
   let players = $state<PlayerInfo[]>([])
   let vessels = $state<VesselState[]>([])
   let contracts = $state<ContractState[]>([])
+  let debris = $state<DebrisDef[]>([])
   const claimAttempts = new Set<string>()
   let chat = $state<{ from: string; color: string; text: string }[]>([])
   let chatInput = $state('')
@@ -74,6 +76,12 @@
     if (game.target?.kind !== 'body') return
     const s = game.planTransferTo(game.target.id)
     pushToast(s ?? `Get into a near-circular orbit around ${hud?.bodyName ?? 'the planet'} first, then plan the transfer.`, s ? '#2ecc71' : '#e57373')
+  }
+  const salvageReady = $derived(
+    hud?.targetKind === 'debris' && hud.targetDist != null && hud.targetDist <= SALVAGE_RANGE && (hud.targetRelSpeed ?? 1e9) <= SALVAGE_SPEED,
+  )
+  function salvageTarget() {
+    if (game.target?.kind === 'debris' && salvageReady) net.send({ type: 'salvage', id: game.target.id })
   }
 
   // Universe clock, anchored to the last server time we heard.
@@ -172,6 +180,7 @@
         you = msg.you
         currentRoom = msg.room
         contracts = msg.contracts
+        debris = msg.debris
         serverTime = msg.universeTime
         serverStamp = performanceNow()
         break
@@ -211,6 +220,13 @@
         pushToast(`${msg.playerName} claimed “${def?.title ?? msg.id}” — +⬡${msg.funds.toLocaleString()} +⚛${msg.science}`, '#f1c40f')
         break
       }
+      case 'debris':
+        debris = msg.debris
+        break
+      case 'salvaged':
+        pushToast(`${msg.playerName} salvaged the ${msg.name} — +⬡${msg.funds.toLocaleString()} +⚛${msg.science}`, '#f1c40f')
+        if (game.target?.kind === 'debris' && game.target.id === msg.id) game.setTarget(null)
+        break
       case 'chat':
         chat = [...chat.slice(-40), { from: msg.from, color: msg.color, text: msg.text }]
         break
@@ -247,8 +263,9 @@
   }
 
   // World position + velocity of a targetable object at universe time t.
-  function objectState(kind: 'vessel' | 'body', id: string, t: number): { pos: { x: number; y: number }; vel: { x: number; y: number } } | null {
+  function objectState(kind: 'vessel' | 'body' | 'debris', id: string, t: number): { pos: { x: number; y: number }; vel: { x: number; y: number } } | null {
     if (kind === 'body') return { pos: bodyPosition(SYSTEM, id, t), vel: bodyVelocity(SYSTEM, id, t) }
+    if (kind === 'debris') { const d = debrisDef(id); return d ? debrisState(d, t) : null }
     const v = vessels.find((x) => x.id === id)
     if (!v) return null
     if (v.orbit) {
@@ -270,12 +287,17 @@
     const t = universeTime()
     const s = mapScale(canvas.width, canvas.height, mapZoom)
     const toScreen = (p: { x: number; y: number }) => ({ x: canvas.width / 2 + (p.x - mapCenter.x) * s, y: canvas.height / 2 - (p.y - mapCenter.y) * s })
-    let best: { kind: 'vessel' | 'body'; id: string; name: string } | null = null
+    let best: { kind: 'vessel' | 'body' | 'debris'; id: string; name: string } | null = null
     let bestD = 26
     for (const b of Object.values(SYSTEM)) {
       const sc = toScreen(bodyPosition(SYSTEM, b.id, t))
       const d = Math.hypot(sc.x - sx, sc.y - sy)
       if (d < bestD) { bestD = d; best = { kind: 'body', id: b.id, name: b.name } }
+    }
+    for (const dz of debris) {
+      const sc = toScreen(debrisState(dz, t).pos)
+      const d = Math.hypot(sc.x - sx, sc.y - sy)
+      if (d < bestD) { bestD = d; best = { kind: 'debris', id: dz.id, name: dz.name } }
     }
     for (const v of vessels) {
       if (v.id === game.vesselId) continue
@@ -379,16 +401,16 @@
         // Main view — rendered on the SHIP's clock so bodies sit where their gravity is.
         if (view === 'map') {
           if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }
-          drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter)
-        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, flightZoom)
+          drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter, debris)
+        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, flightZoom, debris)
         // Picture-in-picture: the OTHER view, small.
         if (showPip && pipCanvas) {
           if (!pipCtx) pipCtx = pipCanvas.getContext('2d')
           if (pipCtx) {
             const pw = pipCanvas.clientWidth, ph = pipCanvas.clientHeight
             if (pipCanvas.width !== pw || pipCanvas.height !== ph) { pipCanvas.width = pw; pipCanvas.height = ph }
-            if (view === 'flight') drawMap(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipMapZoom, { x: 0, y: 0 })
-            else drawFlight(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipFlightZoom)
+            if (view === 'flight') drawMap(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipMapZoom, { x: 0, y: 0 }, debris)
+            else drawFlight(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipFlightZoom, debris)
           }
         }
       }
@@ -678,6 +700,11 @@
       {#if hud.targetKind === 'body'}
         <button class="transfer-btn panel" onclick={planTransfer} title="auto-plan a phase-timed transfer">⇆ Plan transfer to {hud.targetName}</button>
       {/if}
+      {#if hud.targetKind === 'debris'}
+        <button class="transfer-btn salvage-btn panel" class:ready={salvageReady} disabled={!salvageReady} onclick={salvageTarget} title="rendezvous within {SALVAGE_RANGE / 1000} km and match velocity to salvage">
+          {salvageReady ? `⊕ Salvage ${hud.targetName}` : `Match velocity to salvage · ${hud.targetDist != null && hud.targetDist < 9999000 ? (hud.targetDist > 1000 ? (hud.targetDist / 1000).toFixed(1) + ' km' : Math.round(hud.targetDist) + ' m') : '—'} · ${Math.round(hud.targetRelSpeed ?? 0)} m/s`}
+        </button>
+      {/if}
 
       <div class="sas panel">
         <div class="sas-title">SAS</div>
@@ -832,6 +859,8 @@
   .row.tgt { color: #c39bd3; }
   .row.tgt b { color: #d2b4de; }
   .transfer-btn { position: absolute; bottom: 296px; left: 14px; width: auto; padding: 8px 12px; background: rgba(12,16,26,0.82); border: 1px solid #c39bd3; color: #d2b4de; font-size: 13px; font-weight: 600; cursor: pointer; z-index: 6; }
+  .salvage-btn { border-color: #c39bd3; color: #d9b8e6; max-width: 230px; text-align: left; line-height: 1.25; }
+  .salvage-btn.ready { border-color: #2ecc71; color: #2ecc71; background: rgba(46,204,113,0.12); }
   .sas { bottom: 186px; left: 14px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 200px; padding: 8px 10px; }
   .sas-title { width: 100%; color: #7fb0ff; font-size: 11px; letter-spacing: 1.5px; margin-bottom: 2px; }
   .sasb { width: auto; padding: 4px 8px; background: #161c28; color: #aeb4bc; font-size: 12px; font-weight: 600; }

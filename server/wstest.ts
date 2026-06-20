@@ -13,6 +13,7 @@ import { encode, decode, PROTOCOL_VERSION, type ClientMsg, type ServerMsg } from
 import { stateToElements, circularSpeed } from '../shared/orbit.ts'
 import { SYSTEM, ROOT } from '../shared/bodies.ts'
 import { MILESTONES } from '../shared/milestones.ts'
+import { DEBRIS } from '../shared/debris.ts'
 
 const PORT = 8099
 process.env.PORT = String(PORT)
@@ -136,6 +137,23 @@ async function main() {
   const cs = we.contracts.find((x) => x.id === 'comsat-low')
   check('contract is first-come (stays the claimant’s)', cs?.claimedName === 'Ada', `claimedBy=${cs?.claimedName}`)
   e.close()
+
+  // Salvage: park Ada's vessel exactly on a derelict's orbit (perfect rendezvous),
+  // then recover it. Boyd, with no vessel near it, can't.
+  const junk = DEBRIS[0]
+  send(a, { type: 'settle', vesselId: vid, orbit: junk.orbit, status: 'orbit', bodyId: ROOT })
+  await wait(250)
+  send(a, { type: 'salvage', id: junk.id })
+  const salv = await nextOfType(b, 'salvaged', 2000).catch(() => null)
+  check('salvage rewarded on rendezvous', salv?.id === junk.id && salv.funds === junk.funds, `${salv?.name} / ${salv?.funds}`)
+  send(b, { type: 'salvage', id: DEBRIS[1].id }) // Boyd has no qualifying vessel
+  send(a, { type: 'salvage', id: junk.id }) // already gone — no-op
+  await wait(200)
+  const f = await connect()
+  send(f, { type: 'hello', name: 'Fitz', room: 'frontier', protocol: PROTOCOL_VERSION })
+  const wf = await nextOfType(f, 'welcome')
+  check('salvaged piece gone, the rest still drifting', !wf.debris.some((d) => d.id === junk.id) && wf.debris.length === DEBRIS.length - 1, `debris=${wf.debris.length}/${DEBRIS.length}`)
+  f.close()
 
   a.close(); b.close(); c.close(); d.close()
   console.log(`\n${passed} passed, ${failures.length} failed`)

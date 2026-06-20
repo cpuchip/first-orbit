@@ -28,7 +28,7 @@ import type { MilestoneKind } from '../shared/milestones.ts'
 
 export type FlightPhase = 'prelaunch' | 'ascent' | 'coast' | 'circularize'
 export type HoldMode = 'off' | 'prograde' | 'retrograde' | 'radial-out' | 'radial-in' | 'target' | 'anti-target' | 'tgt-prograde' | 'tgt-retrograde' | 'node'
-export interface TargetRef { kind: 'vessel' | 'body'; id: string; name: string }
+export interface TargetRef { kind: 'vessel' | 'body' | 'debris'; id: string; name: string }
 
 export interface Readout {
   altitude: number
@@ -52,7 +52,7 @@ export interface Readout {
   nodeArmed: boolean
   burning: boolean
   targetName: string | null
-  targetKind: 'vessel' | 'body' | null
+  targetKind: 'vessel' | 'body' | 'debris' | null
   targetDist: number | null
   targetRelSpeed: number | null
 }

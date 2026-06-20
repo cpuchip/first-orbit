@@ -8,6 +8,7 @@
 
 import type { Elements } from './orbit.ts'
 import type { MilestoneKind } from './milestones.ts'
+import type { DebrisDef } from './debris.ts'
 
 export interface ContractState {
   id: string
@@ -53,15 +54,18 @@ export type ClientMsg =
   | { type: 'recover'; vesselId: string }
   | { type: 'milestone'; vesselId: string; kind: MilestoneKind }
   | { type: 'claim_contract'; id: string }
+  | { type: 'salvage'; id: string }
   | { type: 'chat'; text: string }
   | { type: 'ping' }
 
 // ---- server -> client ----------------------------------------------------------
 export type ServerMsg =
-  | { type: 'welcome'; you: PlayerInfo; room: string; universeTime: number; players: PlayerInfo[]; vessels: VesselState[]; contracts: ContractState[]; build: string }
+  | { type: 'welcome'; you: PlayerInfo; room: string; universeTime: number; players: PlayerInfo[]; vessels: VesselState[]; contracts: ContractState[]; debris: DebrisDef[]; build: string }
   | { type: 'players'; players: PlayerInfo[] }
   | { type: 'contracts'; contracts: ContractState[] }
   | { type: 'contract_claimed'; id: string; playerName: string; color: string; funds: number; science: number; ts: number }
+  | { type: 'debris'; debris: DebrisDef[] }
+  | { type: 'salvaged'; id: string; name: string; playerName: string; color: string; funds: number; science: number; ts: number }
   | { type: 'snapshot'; universeTime: number; vessels: VesselState[] }
   | { type: 'vesselCreated'; vessel: VesselState }
   | { type: 'achievement'; playerName: string; color: string; kind: MilestoneKind; funds: number; science: number; first: boolean; ts: number }

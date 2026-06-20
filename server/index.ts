@@ -219,6 +219,7 @@ wss.on('connection', (ws) => {
           players: prog.roster(),
           vessels: prog.allVessels(),
           contracts: prog.contractStates(),
+          debris: prog.liveDebris(),
           build: BUILD_SHA,
         })
         broadcastRoom(roomId, { type: 'players', players: prog.roster() })
@@ -287,6 +288,19 @@ wss.on('connection', (ws) => {
           broadcastRoom(client.room!, { type: 'contracts', contracts: prog.contractStates() })
           broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
           missionControl(client.room!, `${res.name} claimed “${contractDef(msg.id)?.title ?? msg.id}” — outstanding flying.`)
+        }
+        break
+      }
+      case 'salvage': {
+        const prog = progOf(client)
+        const me = prog && client.playerId && prog.player(client.playerId)
+        if (!prog || !me) return
+        const res = prog.salvage(me.id, msg.id)
+        if (res) {
+          broadcastRoom(client.room!, { type: 'salvaged', id: msg.id, name: res.debrisName, playerName: res.name, color: me.color, funds: res.funds, science: res.science, ts: Date.now() })
+          broadcastRoom(client.room!, { type: 'debris', debris: prog.liveDebris() })
+          broadcastRoom(client.room!, { type: 'players', players: prog.roster() })
+          missionControl(client.room!, `${res.name} salvaged the ${res.debrisName} — good haul.`)
         }
         break
       }

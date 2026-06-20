@@ -12,8 +12,9 @@ import type { PlayerInfo, VesselState, ContractState } from '../shared/netproto.
 import { MILESTONES, RECOVERY_FUNDS, type MilestoneKind } from '../shared/milestones.ts'
 import { tierCost } from '../shared/tech.ts'
 import { CONTRACTS, contractDef, contractMet } from '../shared/contracts.ts'
+import { DEBRIS, debrisDef, canSalvage, type DebrisDef } from '../shared/debris.ts'
 import { SYSTEM, ROOT } from '../shared/bodies.ts'
-import { apsides } from '../shared/orbit.ts'
+import { apsides, elementsToState } from '../shared/orbit.ts'
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1']
 const MAX_VESSELS_PER_PLAYER = 12
@@ -31,6 +32,7 @@ interface Persisted {
   vessels: VesselState[]
   firsts?: Record<string, string> // milestone kind -> player id who got there first
   contracts?: Record<string, { playerId: string; name: string }>
+  salvaged?: string[] // debris ids already recovered
 }
 
 export interface AwardResult {
@@ -46,6 +48,7 @@ export class Program {
   private vessels = new Map<string, VesselState>()
   private firsts = new Map<string, string>() // milestone kind -> first player id
   private contractClaims = new Map<string, { playerId: string; name: string }>()
+  private salvagedDebris = new Set<string>()
   private stateFile: string
   private dirty = false
 
@@ -57,6 +60,7 @@ export class Program {
     for (const v of loaded?.vessels ?? []) if (validVessel(v)) this.vessels.set(v.id, v)
     for (const [k, v] of Object.entries(loaded?.firsts ?? {})) this.firsts.set(k, v)
     for (const [k, v] of Object.entries(loaded?.contracts ?? {})) this.contractClaims.set(k, v)
+    for (const id of loaded?.salvaged ?? []) this.salvagedDebris.add(id)
     // Persist on a slow cadence; flushes are cheap and the file is small.
     setInterval(() => this.flush(), 5_000).unref?.()
   }
@@ -164,6 +168,34 @@ export class Program {
     return { funds: def.funds, science: def.science, name: p.name }
   }
 
+  /** The debris still out there (un-salvaged) in this room. */
+  liveDebris(): DebrisDef[] {
+    return DEBRIS.filter((d) => !this.salvagedDebris.has(d.id))
+  }
+
+  /** Salvage a derelict — only if the player has a vessel actually rendezvoused with it. */
+  salvage(playerId: string, debrisId: string): { funds: number; science: number; name: string; debrisName: string } | null {
+    const def = debrisDef(debrisId)
+    const p = this.players.get(playerId)
+    if (!def || !p || this.salvagedDebris.has(debrisId)) return null
+    const now = this.universeTime()
+    const rendezvoused = this.allVessels().some((v) => {
+      if (v.owner !== playerId || v.bodyId !== ROOT) return false // debris orbits Terra (root)
+      const st = v.flight
+        ? { pos: { x: v.flight.x, y: v.flight.y }, vel: { x: v.flight.vx, y: v.flight.vy } }
+        : v.orbit
+          ? elementsToState(v.orbit, now)
+          : null
+      return st ? canSalvage(def, now, st.pos, st.vel) : false
+    })
+    if (!rendezvoused) return null
+    this.salvagedDebris.add(debrisId)
+    p.funds += def.funds
+    p.science += def.science
+    this.dirty = true
+    return { funds: def.funds, science: def.science, name: p.name, debrisName: def.name }
+  }
+
   /** Charge a player for a launch. Returns false (no vessel) if they can't afford it. */
   chargeLaunch(playerId: string, cost: number): boolean {
     const p = this.players.get(playerId)
@@ -231,6 +263,7 @@ export class Program {
       vessels: this.allVessels(),
       firsts: Object.fromEntries(this.firsts),
       contracts: Object.fromEntries(this.contractClaims),
+      salvaged: [...this.salvagedDebris],
     }
     try {
       fs.mkdirSync(path.dirname(this.stateFile), { recursive: true })
