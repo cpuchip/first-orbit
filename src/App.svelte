@@ -31,6 +31,9 @@
   let mapCenter = $state({ x: 0, y: 0 })
   let mapFollow = $state(false)
   let flightZoom = $state(1)
+  let pipMapZoom = $state(0.85)
+  let pipFlightZoom = $state(1)
+  let showPip = $state(true)
   let hud = $state<ReturnType<Game['readout']> | null>(null)
   let nodeInfo = $state<ReturnType<Game['nodeReadout']>>(null)
   let you = $state<PlayerInfo | null>(null)
@@ -60,6 +63,13 @@
     toasts = [...toasts, { id, text, color, first: false }]
     setTimeout(() => { toasts = toasts.filter((t) => t.id !== id) }, 8000)
   }
+  const swapView = () => (view = view === 'flight' ? 'map' : 'flight')
+  function onPipWheel(e: WheelEvent) {
+    e.preventDefault()
+    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15
+    if (view === 'flight') pipMapZoom = Math.max(0.15, Math.min(40, pipMapZoom * f))
+    else pipFlightZoom = Math.max(0.15, Math.min(12, pipFlightZoom * f))
+  }
   function planTransfer() {
     if (game.target?.kind !== 'body') return
     const s = game.planTransferTo(game.target.id)
@@ -81,6 +91,8 @@
 
   let canvas: HTMLCanvasElement
   let ctx: CanvasRenderingContext2D
+  let pipCanvas: HTMLCanvasElement
+  let pipCtx: CanvasRenderingContext2D | null = null
 
   // --- Vehicle Assembly: an editable, persisted rocket design ---------------
   type StageDesign = { engine: 'none' | 'main' | 'vac'; engineCount: number; tanks: number; tankSize: 'small' | 'large'; fins: boolean }
@@ -342,33 +354,43 @@
       last = now
       resize()
       if (screen === 'flight') {
-        if (paused) { hud = game.readout(); nodeInfo = game.nodeReadout(); if (view === 'map') { if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }; drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter) } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, flightZoom); raf = requestAnimationFrame(frame); return }
-        pollKeys(dt)
-        // feed the target's live position/velocity to the game (or clear if it's gone).
-        // Use the ship's own clock (st.t) so the target lines up with the bodies as drawn.
-        if (game.target) {
-          const ts = objectState(game.target.kind, game.target.id, game.st.t)
-          if (ts) { game.targetPos = ts.pos; game.targetVel = ts.vel }
-          else game.setTarget(null)
+        // Advance the sim unless paused (private rooms only).
+        if (!paused) {
+          pollKeys(dt)
+          // Keep the target's live position/velocity fed in, on the SHIP's clock.
+          if (game.target) {
+            const ts = objectState(game.target.kind, game.target.id, game.st.t)
+            if (ts) { game.targetPos = ts.pos; game.targetVel = ts.vel }
+            else game.setTarget(null)
+          }
+          game.update(dt)
         }
-        game.update(dt)
         hud = game.readout()
         nodeInfo = game.nodeReadout()
         // Contract detection: claim any open contract this vessel now satisfies.
-        if (game.vesselId) {
-          const ctx = { bodyId: game.currentBody(), inOrbit: hud.inOrbit, periapsisAlt: hud.periapsisAlt, landed: hud.landed }
+        if (!paused && game.vesselId) {
+          const cctx = { bodyId: game.currentBody(), inOrbit: hud.inOrbit, periapsisAlt: hud.periapsisAlt, landed: hud.landed }
           for (const c of contracts) {
             if (c.claimedBy || claimAttempts.has(c.id)) continue
             const def = contractDef(c.id)
-            if (def && contractMet(def, ctx)) { claimAttempts.add(c.id); net.send({ type: 'claim_contract', id: c.id }) }
+            if (def && contractMet(def, cctx)) { claimAttempts.add(c.id); net.send({ type: 'claim_contract', id: c.id }) }
           }
         }
-        // Render the universe on the SHIP's clock (st.t), not the wall clock — so the
-        // Moon (and everything) is drawn where its gravity actually is.
+        // Main view — rendered on the SHIP's clock so bodies sit where their gravity is.
         if (view === 'map') {
           if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }
           drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter)
         } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, flightZoom)
+        // Picture-in-picture: the OTHER view, small.
+        if (showPip && pipCanvas) {
+          if (!pipCtx) pipCtx = pipCanvas.getContext('2d')
+          if (pipCtx) {
+            const pw = pipCanvas.clientWidth, ph = pipCanvas.clientHeight
+            if (pipCanvas.width !== pw || pipCanvas.height !== ph) { pipCanvas.width = pw; pipCanvas.height = ph }
+            if (view === 'flight') drawMap(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipMapZoom, { x: 0, y: 0 })
+            else drawFlight(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipFlightZoom)
+          }
+        }
       }
       raf = requestAnimationFrame(frame)
     }
@@ -435,6 +457,18 @@
         <div class="toast" class:first={t.first}><b style="color:{t.color}">{t.text}</b></div>
       {/each}
     </div>
+  {/if}
+
+  {#if screen === 'flight' && showPip}
+    <div class="pip-wrap">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <canvas bind:this={pipCanvas} class="pip" onclick={swapView} onwheel={onPipWheel} title="click to switch to this view · scroll to zoom"></canvas>
+      <div class="pip-label">{view === 'flight' ? '◎ SYSTEM' : '▲ SHIP'}</div>
+      <button class="pip-x" onclick={(e) => { e.stopPropagation(); showPip = false }} title="hide minimap">×</button>
+    </div>
+  {/if}
+  {#if screen === 'flight' && !showPip}
+    <button class="pip-show" onclick={() => (showPip = true)} title="show minimap">◳ minimap</button>
   {/if}
 
   {#if showBoard && players.length && screen !== 'menu'}
@@ -776,6 +810,11 @@
   .menu-panel .ghost { background: #1a2130; color: #c8ccd2; margin-top: 8px; }
   .menu-panel .ghost.danger { background: #2a1c1c; color: #e57373; }
   .paused-banner { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 8; background: rgba(241,196,15,0.15); border: 1px solid #f1c40f; color: #f1c40f; padding: 6px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .pip-wrap { position: absolute; right: 14px; bottom: 236px; width: 220px; height: 150px; z-index: 7; border: 1px solid #2a3344; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
+  .pip { display: block; width: 100%; height: 100%; background: #05070d; cursor: pointer; }
+  .pip-label { position: absolute; top: 4px; left: 7px; font-size: 10.5px; letter-spacing: 1px; color: #9fb4d8; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  .pip-x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0; background: rgba(0,0,0,0.4); border: none; color: #9aa0a6; font-size: 15px; line-height: 1; cursor: pointer; border-radius: 4px; }
+  .pip-show { position: absolute; right: 14px; bottom: 236px; z-index: 7; padding: 5px 11px; background: rgba(12,16,26,0.82); border: 1px solid #2a3344; color: #9fb4d8; font-size: 12px; cursor: pointer; border-radius: 6px; }
   .throttle { top: 14px; right: 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .throttle .bar { width: 14px; height: 120px; background: #0c111c; border-radius: 7px; overflow: hidden; display: flex; align-items: flex-end; }
   .throttle .fill { width: 100%; background: linear-gradient(#2f6fed, #2ecc71); transition: height 0.05s linear; }
