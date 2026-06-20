@@ -25,6 +25,7 @@
   let mapZoom = $state(1)
   let mapCenter = $state({ x: 0, y: 0 })
   let mapFollow = $state(false)
+  let flightZoom = $state(1)
   let hud = $state<ReturnType<Game['readout']> | null>(null)
   let nodeInfo = $state<ReturnType<Game['nodeReadout']>>(null)
   let you = $state<PlayerInfo | null>(null)
@@ -241,8 +242,8 @@
     if (k === 'p') showBoard = !showBoard
     if (k === 'h' || k === '?') showHelp = !showHelp
     if (k === 'r') recover()
-    if (k === '.') game.warp = Math.min(100000, game.warp * 10)
-    if (k === ',') game.warp = Math.max(1, game.warp / 10)
+    if (k === '.') game.warpUp()
+    if (k === ',') game.warpDown()
     // SAS heading hold
     if (k === 'q') game.setHold('prograde')
     if (k === 'e') game.setHold('retrograde')
@@ -303,7 +304,7 @@
         if (view === 'map') {
           if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }
           drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter)
-        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t)
+        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, flightZoom)
       }
       raf = requestAnimationFrame(frame)
     }
@@ -313,9 +314,10 @@
     }
     // Map pan (drag) and zoom (wheel).
     const onWheel = (e: WheelEvent) => {
-      if (view !== 'map') return
       e.preventDefault()
-      mapZoom = Math.max(0.15, Math.min(80, mapZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+      const f = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      if (view === 'map') mapZoom = Math.max(0.15, Math.min(80, mapZoom * f))
+      else flightZoom = Math.max(0.15, Math.min(12, flightZoom * f))
     }
     let dragging = false, lastX = 0, lastY = 0
     const onDown = (e: PointerEvent) => {
@@ -530,7 +532,11 @@
         <button class="sasb" class:on={hud.hold === 'radial-out'} onclick={() => game.setHold('radial-out')}>Rad+</button>
         <button class="sasb" class:on={hud.hold === 'radial-in'} onclick={() => game.setHold('radial-in')}>Rad−</button>
         {#if game.node}<button class="sasb" class:on={hud.hold === 'node'} onclick={() => game.setHold('node')}>Node</button>{/if}
-        {#if hud.targetName}<button class="sasb tgt" class:on={hud.hold === 'target'} onclick={() => game.setHold('target')}>Tgt</button>{/if}
+        {#if hud.targetName}
+          <button class="sasb tgt" class:on={hud.hold === 'target'} onclick={() => game.setHold('target')} title="point at target">◎</button>
+          <button class="sasb tgt" class:on={hud.hold === 'tgt-prograde'} onclick={() => game.setHold('tgt-prograde')} title="toward target (relative velocity)">T▲</button>
+          <button class="sasb tgt" class:on={hud.hold === 'tgt-retrograde'} onclick={() => game.setHold('tgt-retrograde')} title="kill relative velocity">T▼</button>
+        {/if}
       </div>
 
       {#if nodeInfo}

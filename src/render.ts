@@ -99,13 +99,15 @@ export function drawFlight(
   vessels: VesselState[] = [],
   players: PlayerInfo[] = [],
   universeTime = 0,
+  zoom = 1,
 ): void {
   const st = game.st
   const r = game.readout()
   const alt = r.altitude
 
-  // Auto framing: ~1.5 km of view on the pad, widening with altitude.
-  const span = Math.max(1500, Math.min(alt * 3 + 1500, 6_000_000))
+  // Auto framing: ~1.5 km of view on the pad, widening with altitude; the player's
+  // scroll-wheel zoom scales it (in to see the rocket, out to see nearby bodies).
+  const span = Math.max(120, Math.min((alt * 3 + 1500) / zoom, 60_000_000))
   const s = h / span // px per metre
   const center = st.pos
   const toScreen = (p: Vec2): Vec2 => vec(w / 2 + (p.x - center.x) * s, h / 2 - (p.y - center.y) * s)

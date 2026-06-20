@@ -26,7 +26,7 @@ import { FLIGHT_HZ, type ClientMsg } from '../shared/netproto.ts'
 import type { MilestoneKind } from '../shared/milestones.ts'
 
 export type FlightPhase = 'prelaunch' | 'ascent' | 'coast' | 'circularize'
-export type HoldMode = 'off' | 'prograde' | 'retrograde' | 'radial-out' | 'radial-in' | 'target' | 'anti-target' | 'node'
+export type HoldMode = 'off' | 'prograde' | 'retrograde' | 'radial-out' | 'radial-in' | 'target' | 'anti-target' | 'tgt-prograde' | 'tgt-retrograde' | 'node'
 export interface TargetRef { kind: 'vessel' | 'body'; id: string; name: string }
 
 export interface Readout {
@@ -58,6 +58,8 @@ export interface Readout {
 const ROOT_BODY = SYSTEM[ROOT]
 const ATMO = ROOT_BODY.atmosphere?.height ?? 0
 const HOLD_RATE = 2.5 // rad/s heading slew under SAS / node hold
+const PHYS_WARP_MAX = 4 // physics warp (works on the ground / in atmosphere)
+const WARP_LADDER = [1, 2, 3, 4, 10, 50, 100, 1000, 10000, 100000]
 
 /** Rotate `cur` toward `target` by at most `maxStep` radians. */
 function slew(cur: number, target: number, maxStep: number): number {
@@ -129,6 +131,13 @@ export class Game {
     this.autopilot = !this.autopilot
     if (this.autopilot) this.apPhase = 'ascent'
   }
+  warpUp(): void {
+    this.warp = WARP_LADDER.find((w) => w > this.warp) ?? this.warp
+  }
+  warpDown(): void {
+    for (let i = WARP_LADDER.length - 1; i >= 0; i--) if (WARP_LADDER[i] < this.warp) return void (this.warp = WARP_LADDER[i])
+    this.warp = 1
+  }
 
   // --- SAS heading hold ---------------------------------------------------
   setHold(m: HoldMode): void {
@@ -148,6 +157,8 @@ export class Game {
       case 'radial-in': return angleOf(scale(rf.relPos, -1))
       case 'target': return this.targetPos ? angleOf(sub(this.targetPos, this.st.pos)) : null
       case 'anti-target': return this.targetPos ? angleOf(sub(this.st.pos, this.targetPos)) : null
+      case 'tgt-prograde': return this.targetVel ? angleOf(sub(this.st.vel, this.targetVel)) : null
+      case 'tgt-retrograde': return this.targetVel ? angleOf(sub(this.targetVel, this.st.vel)) : null
       case 'node': return this.nodes[0] ? angleOf(nodeBurnDir(this.elements(), this.nodes[0])) : null
       default: return null
     }
@@ -158,7 +169,7 @@ export class Game {
     this.target = t
     this.targetPos = null
     this.targetVel = null
-    if (!t && (this.hold === 'target' || this.hold === 'anti-target')) this.hold = 'off'
+    if (!t && this.hold.startsWith('t')) this.hold = 'off' // target / tgt-prograde / tgt-retrograde
   }
 
   // --- maneuver nodes (a chronological queue) -----------------------------
@@ -366,12 +377,14 @@ export class Game {
       this.throttle = 0
     }
 
-    // Throttle forces warp back to 1 — you cannot warp under power.
-    const coasting = this.throttle === 0 && alt > ATMO
-    if (!coasting) this.warp = 1
+    // Warp: physics warp (≤4×) works anywhere — even on the pad and in atmosphere;
+    // on-rails warp (>4×) needs coasting out of the atmosphere. Node auto-burns
+    // force 1× (set in the arm machine).
+    const onRails = this.throttle === 0 && alt > ATMO
+    if (this.warp > PHYS_WARP_MAX && !onRails) this.warp = PHYS_WARP_MAX
 
     // --- integrate ----------------------------------------------------------
-    if (this.warp > 1 && coasting) {
+    if (this.warp > PHYS_WARP_MAX && onRails) {
       // On-rails warp in the current dominant body's frame (patched conics).
       const rf = referenceFrame(SYSTEM, ROOT, this.st.pos, this.st.vel, this.st.t)
       const t2 = this.st.t + dtReal * this.warp
@@ -383,7 +396,8 @@ export class Game {
         t: t2,
       }
     } else {
-      const span = dt
+      // Stepped physics, sped up by physics-warp (more substeps per frame).
+      const span = dt * Math.min(this.warp, PHYS_WARP_MAX)
       const n = Math.max(1, Math.ceil(span / 0.05))
       const sdt = span / n
       for (let i = 0; i < n; i++) {
