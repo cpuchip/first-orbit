@@ -350,7 +350,9 @@ export function drawMap(
     ctx.fillText(b.name, sc.x + Math.max(5, b.radius * s) + 3, sc.y + 3)
   }
 
-  // The player's own orbit, drawn around whichever body it's bound to.
+  // The player's own orbit + maneuver nodes — only when you're actually flying one
+  // (in the observer view there's no active craft, and game.st isn't valid).
+  if (game.vesselId) {
   const el = game.elements()
   const pBodyPos = bodyPosition(SYSTEM, game.currentBody(), universeTime)
   if (el.e < 1) {
@@ -403,6 +405,7 @@ export function drawMap(
       ctx.arc(nsc.x, nsc.y, 9, 0, Math.PI * 2)
       ctx.stroke()
     }
+  }
   }
 
   // Other players' vessels (propagated by their analytic orbit / last flight snap).

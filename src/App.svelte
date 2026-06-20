@@ -16,7 +16,12 @@
   const BUILD = __BUILD_SHA__
   const terra = SYSTEM[ROOT]
 
-  let screen = $state<'menu' | 'vab' | 'flight'>('menu')
+  // 'menu' = title; 'observe' = connected, watching the map/your fleet, not flying;
+  // 'flight' = piloting a craft. The Assembly (showVab) is an overlay you can open
+  // and close anytime over observe or flight.
+  let screen = $state<'menu' | 'observe' | 'flight'>('menu')
+  let showVab = $state(false)
+  let launching = $state(false) // true between clicking Launch and the server confirming the vessel
   let view = $state<'flight' | 'map'>('flight')
   let callsign = $state(localStorage.getItem('fo-callsign') ?? '')
   let roomCode = $state(localStorage.getItem('fo-room') ?? '')
@@ -60,13 +65,16 @@
     return v.status
   }
   function locate(v: VesselState) {
-    const s = objectState('vessel', v.id, game.st.t)
+    const t = screen === 'flight' ? game.st.t : universeTime()
+    const s = objectState('vessel', v.id, t)
     if (!s) return
+    if (screen !== 'flight') screen = 'observe'
     view = 'map'
     mapCenter = { x: s.pos.x, y: s.pos.y }
     mapFollow = v.id === game.vesselId
     mapZoom = v.bodyId === ROOT ? 18 : 40
     showFleet = false
+    showVab = false
   }
   function recoverVessel(v: VesselState) {
     if (v.id === game.vesselId) { showFleet = false; recover(); return } // your active craft → back to the VAB
@@ -226,6 +234,9 @@
         debris = msg.debris
         serverTime = msg.universeTime
         serverStamp = performanceNow()
+        // A brand-new program (no craft aloft yet) opens straight into the Assembly;
+        // a returning pilot lands on the map looking at their fleet.
+        if (screen === 'observe') showVab = msg.vessels.every((v) => v.ownerName !== msg.you.name)
         break
       case 'players':
         players = msg.players
@@ -248,8 +259,10 @@
         break
       case 'vesselCreated':
         vessels = [...vessels, msg.vessel]
-        if (msg.vessel.ownerName === callsign && screen === 'vab') {
+        if (msg.vessel.ownerName === callsign && launching) {
+          launching = false
           game.launch(pendingVehicle, msg.vessel.id, universeTime())
+          showVab = false
           screen = 'flight'
           view = 'flight'
           try { if (!localStorage.getItem('fo-helped')) showHelp = true } catch { /* private mode */ }
@@ -289,20 +302,26 @@
       localStorage.setItem('fo-room', roomCode.trim())
     } catch { /* private mode */ }
     net.connect(name, room)
-    screen = 'vab'
+    screen = 'observe'
+    view = 'map'
+    // The welcome handler opens the Assembly automatically for a brand-new program.
   }
+  function openVab() { showVab = true; showFleet = false }
+  function closeVab() { showVab = false }
 
   function launch() {
     if (!buildable) return pushToast('This design uses parts you haven’t unlocked yet — see Tech.', '#e57373')
     if (!canAfford) return pushToast(`Not enough funds — this rocket costs ⬡${vabCost.toLocaleString()}, you have ⬡${youFunds.toLocaleString()}.`, '#e57373')
     pendingVehicle = buildVehicle(design)
+    launching = true
     net.send({ type: 'launch', vesselName: design.name.trim() || 'Unnamed', bodyId: ROOT, cost: vabCost, vehicle: { stages: pendingVehicle.stages } })
   }
 
   function recover() {
     if (game.vesselId) net.send({ type: 'recover', vesselId: game.vesselId })
     game.vesselId = ''
-    screen = 'vab'
+    screen = 'observe'
+    view = 'map'
   }
 
   // World position + velocity of a targetable object at universe time t.
@@ -365,15 +384,22 @@
     if ((e.target as HTMLElement)?.tagName === 'INPUT') return
     const k = e.key.toLowerCase()
     keys.add(k)
+    // Global (observe + flight): the Assembly, fleet, and menu are reachable anywhere.
+    if (k === 'escape') {
+      if (showVab) showVab = false
+      else if (showFleet) showFleet = false
+      else if (screen === 'flight') showMenu = !showMenu
+      return
+    }
+    if (k === 'f' && screen !== 'menu') { showFleet = !showFleet; return }
+    if (k === 'b' && screen === 'observe') { openVab(); return }
     if (screen !== 'flight') return
     if (k === ' ') { e.preventDefault(); game.stageNow() }
     if (k === 'g') game.toggleAutopilot()
     if (k === 'm') view = view === 'map' ? 'flight' : 'map'
     if (k === 'p') showBoard = !showBoard
     if (k === 'h' || k === '?') showHelp = !showHelp
-    if (k === 'f') showFleet = !showFleet
     if (k === 'c') circularize()
-    if (k === 'escape') { if (showFleet) showFleet = false; else showMenu = !showMenu }
     if (k === 'r') recover()
     if (k === '.') game.warpUp()
     if (k === ',') game.warpDown()
@@ -458,6 +484,10 @@
             else drawFlight(pipCtx, pipCanvas.width, pipCanvas.height, game, vessels, players, game.st.t, pipFlightZoom, debris)
           }
         }
+      } else if (screen === 'observe') {
+        // Watching the universe without a craft of your own — the live map of
+        // everyone's vessels, the junk, and the bodies, on the universe clock.
+        drawMap(ctx, canvas.width, canvas.height, game, vessels, players, universeTime(), mapZoom, mapCenter, debris)
       }
       raf = requestAnimationFrame(frame)
     }
@@ -516,7 +546,7 @@
 </script>
 
 <div class="app">
-  <canvas bind:this={canvas} class="scene" class:hidden={screen !== 'flight'}></canvas>
+  <canvas bind:this={canvas} class="scene" class:hidden={screen === 'menu'}></canvas>
 
   {#if toasts.length}
     <div class="toasts">
@@ -638,7 +668,10 @@
             {/each}
           </div>
         {/if}
-        <button onclick={() => (showFleet = false)}>Close ▸</button>
+        <div class="fleet-foot">
+          <button class="ghost" onclick={() => { showFleet = false; openVab() }}>＋ New rocket</button>
+          <button onclick={() => (showFleet = false)}>Close ▸</button>
+        </div>
       </div>
     </div>
   {/if}
@@ -658,12 +691,13 @@
     </div>
   {/if}
 
-  {#if screen === 'vab'}
+  {#if showVab && screen !== 'menu'}
     <div class="overlay center">
       <div class="panel vab">
+        <button class="vab-close" onclick={closeVab} title="close the Assembly (Esc)">✕</button>
         <h2>Vehicle Assembly</h2>
         {#if myFleet.length}
-          <button class="chip fleet-vab" onclick={() => (showFleet = true)} title="take control of a craft you already have in space">⊙ Your fleet — fly one of your {myFleet.length} craft already aloft</button>
+          <button class="chip fleet-vab" onclick={() => { showVab = false; showFleet = true }} title="take control of a craft you already have in space">⊙ Your fleet — fly one of your {myFleet.length} craft already aloft</button>
         {/if}
         <div class="presets">
           <span>Presets</span>
@@ -835,6 +869,25 @@
       {/if}
     </div>
   {/if}
+
+  {#if screen === 'observe' && !showVab && !showFleet}
+    <div class="observe-bar">
+      <button onclick={openVab} title="build a new rocket (B)">🔧 Build rocket</button>
+      <button onclick={() => (showFleet = true)} title="your craft in space (F)">⊙ Your fleet · {myFleet.length}</button>
+      <span class="ob-hint">Mission Control — scroll/drag to explore the program. Build a rocket, or fly one you already have aloft.</span>
+    </div>
+    <div class="map-controls panel">
+      <button class="mc" onclick={() => (mapZoom = Math.max(0.15, mapZoom / 1.4))}>−</button>
+      <span class="zoom">{mapZoom >= 1 ? mapZoom.toFixed(1) : mapZoom.toFixed(2)}×</span>
+      <button class="mc" onclick={() => (mapZoom = Math.min(80, mapZoom * 1.4))}>+</button>
+      <button class="mc wide" onclick={() => { mapCenter = { x: 0, y: 0 }; mapZoom = 1 }}>⌖ Reset</button>
+      <span class="mc-hint">scroll = zoom · drag = pan</span>
+    </div>
+    <div class="chat panel">
+      {#each chat as c}<div class="line"><b style="color:{c.color}">{c.from}</b> {c.text}</div>{/each}
+      <input placeholder="message…" bind:value={chatInput} onkeydown={(e) => e.key === 'Enter' && sendChat()} />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -854,7 +907,7 @@
   button { width: 100%; padding: 11px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
   button:disabled { opacity: 0.4; cursor: default; }
   .build { margin-top: 12px; color: #5a606a; font-size: 12px; }
-  .vab { max-width: 540px; max-height: 88vh; overflow-y: auto; }
+  .vab { max-width: 540px; max-height: 88vh; overflow-y: auto; position: relative; }
   .presets { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; color: #7a808a; font-size: 13px; }
   .chip { width: auto; padding: 5px 12px; background: #1a2130; color: #c8ccd2; font-size: 13px; font-weight: 500; }
   .chip.add { width: 100%; margin: 10px 0 4px; background: #16203a; color: #7fb0ff; }
@@ -927,6 +980,14 @@
   .fleet-actions { display: flex; gap: 5px; flex-shrink: 0; }
   .chip.fly { background: rgba(46,204,113,0.18); border-color: #2ecc71; color: #2ecc71; }
   .fleet-vab { display: block; width: 100%; margin: 0 0 12px; background: rgba(127,176,255,0.12); border-color: #7fb0ff; color: #aecbff; padding: 9px; }
+  .fleet-foot { display: flex; gap: 8px; margin-top: 4px; }
+  .fleet-foot button { flex: 1; }
+  .vab-close { position: absolute; top: 12px; right: 14px; width: 30px; height: 30px; padding: 0; background: #1a2130; border: 1px solid #2a3344; color: #9aa0a6; font-size: 16px; line-height: 1; cursor: pointer; border-radius: 6px; }
+  .observe-bar { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px; background: rgba(12,16,26,0.85); border: 1px solid #1c2331; border-radius: 10px; padding: 8px 12px; max-width: 92vw; }
+  .observe-bar button { padding: 7px 13px; background: #1a2130; border: 1px solid #2a3344; color: #dfe3e8; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 7px; white-space: nowrap; }
+  .observe-bar button:first-child { background: rgba(127,176,255,0.16); border-color: #7fb0ff; color: #cfe0ff; }
+  .ob-hint { color: #8a909a; font-size: 12px; }
+  @media (max-width: 640px) { .ob-hint { display: none; } }
   .menu-overlay { z-index: 22; background: rgba(5,6,10,0.6); }
   .menu-panel { max-width: 360px; text-align: center; }
   .menu-panel h2 { margin: 0 0 2px; letter-spacing: 2px; }
