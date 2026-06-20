@@ -208,12 +208,17 @@ export function step(
   return { t: st.t + dt, pos: finalPos, vel, heading, throttle, stageIndex, fuel, landed }
 }
 
-/** Build the on-pad initial state for a launch straight "up" (+y) from the root body. */
-export function launchState(world: FlightWorld, stages: FlightStage[]): FlightState {
+/**
+ * Build the on-pad initial state for a launch straight "up" (+y) from the root body.
+ * `startT` syncs the mission clock to the universe clock so bodies' gravitational
+ * positions (computed at st.t) match where they're drawn — without it the Moon's
+ * picture and its gravity drift apart.
+ */
+export function launchState(world: FlightWorld, stages: FlightStage[], startT = 0): FlightState {
   const root = world.system[world.root]
-  const rp = bodyPosition(world.system, world.root, 0)
+  const rp = bodyPosition(world.system, world.root, startT)
   return {
-    t: 0,
+    t: startT,
     pos: vec(rp.x, rp.y + root.radius),
     vel: vec(0, 0),
     heading: Math.PI / 2, // straight up

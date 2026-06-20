@@ -64,9 +64,13 @@ function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, alpha: n
 
 /** World position of a vessel in the root frame at a given universe time. */
 export function vesselWorldPos(v: VesselState, universeTime: number): Vec2 | null {
-  if (v.orbit) return add(elementsToState(v.orbit, universeTime).pos, bodyPosition(SYSTEM, v.bodyId, universeTime))
-  if (v.flight) return vec(v.flight.x, v.flight.y)
-  return null
+  let p: Vec2 | null = null
+  if (v.orbit) p = add(elementsToState(v.orbit, universeTime).pos, bodyPosition(SYSTEM, v.bodyId, universeTime))
+  else if (v.flight) p = vec(v.flight.x, v.flight.y)
+  // Defensive: a corrupt orbit (e.g. from the old clock bug) can yield NaN — never
+  // let one bad vessel break everyone's render.
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null
+  return p
 }
 
 // Eased display positions, so other players' active flights glide between the
@@ -266,6 +270,16 @@ export function drawMap(
       ctx.stroke()
     }
     drawBodyDisk(ctx, sc.x, sc.y, Math.max(3, b.radius * s), b.id, b.color)
+    // Sphere of influence (so you can see when you cross into a moon's pull).
+    if (b.parent && b.soi) {
+      ctx.beginPath()
+      ctx.arc(sc.x, sc.y, b.soi * s, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(185,182,173,0.18)'
+      ctx.setLineDash([3, 5])
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
     ctx.fillStyle = 'rgba(255,255,255,0.7)'
     ctx.font = '11px system-ui, sans-serif'
     ctx.fillText(b.name, sc.x + Math.max(5, b.radius * s) + 3, sc.y + 3)
@@ -292,7 +306,7 @@ export function drawMap(
   }
 
   // Maneuver nodes: each planned orbit in the chain (dashed gold) + a burn marker.
-  const chain = game.plannedChain()
+  const chain = game.chainForDisplay()
   for (let i = 0; i < game.nodes.length; i++) {
     const planned = chain[i]
     const activeI = i === game.activeNodeIdx

@@ -12,6 +12,14 @@ import type { PlayerInfo, VesselState } from '../shared/netproto.ts'
 import { MILESTONES, RECOVERY_FUNDS, type MilestoneKind } from '../shared/milestones.ts'
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#ecf0f1']
+const MAX_VESSELS_PER_PLAYER = 12
+
+/** Reject vessels with non-finite orbit/flight data (e.g. corrupted by the old clock bug). */
+function validVessel(v: VesselState): boolean {
+  if (v.orbit) return [v.orbit.a, v.orbit.e, v.orbit.argPe, v.orbit.M0, v.orbit.t0, v.orbit.mu].every(Number.isFinite)
+  if (v.flight) return [v.flight.x, v.flight.y, v.flight.vx, v.flight.vy].every(Number.isFinite)
+  return true
+}
 
 interface Persisted {
   startWall: number
@@ -40,7 +48,7 @@ export class Program {
     const loaded = this.load()
     this.startWall = loaded?.startWall ?? Date.now()
     for (const p of loaded?.players ?? []) this.players.set(p.id, { ...p, achieved: p.achieved ?? [] })
-    for (const v of loaded?.vessels ?? []) this.vessels.set(v.id, v)
+    for (const v of loaded?.vessels ?? []) if (validVessel(v)) this.vessels.set(v.id, v)
     for (const [k, v] of Object.entries(loaded?.firsts ?? {})) this.firsts.set(k, v)
     // Persist on a slow cadence; flushes are cheap and the file is small.
     setInterval(() => this.flush(), 5_000).unref?.()
@@ -81,6 +89,9 @@ export class Program {
   }
 
   createVessel(owner: PlayerInfo, vesselName: string, bodyId: string): VesselState {
+    // Cap abandoned vessels per player so a long-lived MMO room can't accrete junk.
+    const mine = this.allVessels().filter((x) => x.owner === owner.id)
+    if (mine.length >= MAX_VESSELS_PER_PLAYER) this.vessels.delete(mine[0].id)
     const v: VesselState = {
       id: nanoid(10),
       owner: owner.id,

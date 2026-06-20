@@ -93,6 +93,7 @@ export class Game {
   private nodeArmed = false
   private executingNode = false
   private nodeRemaining = 0
+  private armedChain: Elements[] = [] // planned orbits frozen at arm time (so the line doesn't move while burning)
   hold: HoldMode = 'off'
   target: TargetRef | null = null
   targetPos: Vec2 | null = null // world pos of the target, set by the App each frame
@@ -100,9 +101,9 @@ export class Game {
   send: (m: ClientMsg) => void = () => {}
   onMilestone: (kind: MilestoneKind) => void = () => {}
 
-  launch(vehicle: Vehicle, vesselId: string): void {
+  launch(vehicle: Vehicle, vesselId: string, startT = 0): void {
     this.stages = flightStages(vehicle)
-    this.st = launchState(this.world, this.stages)
+    this.st = launchState(this.world, this.stages, startT)
     this.vesselId = vesselId
     this.throttle = 0
     this.autopilot = false
@@ -227,28 +228,36 @@ export class Game {
     this.autopilot = false
     this.hold = 'off'
     this.nodeRemaining = nodeDeltaV(this.nodes[0])
+    this.armedChain = this.plannedChain() // freeze the projection for the burn
   }
   private disarmNode(): void {
     this.nodeArmed = false
     this.executingNode = false
     this.throttle = 0
     this.warp = 1
+    this.armedChain = []
   }
   private completeNode(): void {
     this.executingNode = false
     this.throttle = 0
     this.nodes.shift() // drop the burned node; the next becomes nodes[0]
+    this.armedChain.shift()
     this.editIdx = Math.max(0, Math.min(this.editIdx, this.nodes.length - 1))
     if (this.nodes.length) {
       this.nodeRemaining = nodeDeltaV(this.nodes[0]) // keep armed for the next node
     } else {
       this.nodeArmed = false
+      this.armedChain = []
       if (this.hold === 'node') this.hold = 'off'
     }
   }
   plannedElements(): Elements | null {
     const chain = this.plannedChain()
     return chain[this.editIdx] ?? null
+  }
+  /** Planned orbits to DISPLAY — frozen while burning so the line doesn't drift. */
+  chainForDisplay(): Elements[] {
+    return this.executingNode && this.armedChain.length ? this.armedChain : this.plannedChain()
   }
   nodeReadout(): { pro: number; rad: number; dv: number; tMinus: number; apoAlt: number; periAlt: number; armed: boolean; executing: boolean; index: number; count: number } | null {
     const n = this.node
@@ -350,6 +359,12 @@ export class Game {
     // ascent, node burns, or a held throttle) — drop the spent stage so the
     // next engine lights instead of stranding.
     if (this.throttle > 0 && this.st.fuel <= 1e-6 && this.st.stageIndex < this.stages.length - 1) this.stageReq = true
+    // Out of fuel on the last stage: release the autopilot gracefully (don't hold
+    // throttle forever on a dead engine).
+    if (this.autopilot && this.st.fuel <= 1e-6 && this.st.stageIndex >= this.stages.length - 1) {
+      this.autopilot = false
+      this.throttle = 0
+    }
 
     // Throttle forces warp back to 1 — you cannot warp under power.
     const coasting = this.throttle === 0 && alt > ATMO

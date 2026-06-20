@@ -141,7 +141,7 @@
       case 'vesselCreated':
         vessels = [...vessels, msg.vessel]
         if (msg.vessel.ownerName === callsign && screen === 'vab') {
-          game.launch(pendingVehicle, msg.vessel.id)
+          game.launch(pendingVehicle, msg.vessel.id, universeTime())
           screen = 'flight'
           view = 'flight'
           try { if (!localStorage.getItem('fo-helped')) showHelp = true } catch { /* private mode */ }
@@ -288,19 +288,22 @@
       resize()
       if (screen === 'flight') {
         pollKeys(dt)
-        // feed the target's live position/velocity to the game (or clear if it's gone)
+        // feed the target's live position/velocity to the game (or clear if it's gone).
+        // Use the ship's own clock (st.t) so the target lines up with the bodies as drawn.
         if (game.target) {
-          const ts = objectState(game.target.kind, game.target.id, universeTime())
+          const ts = objectState(game.target.kind, game.target.id, game.st.t)
           if (ts) { game.targetPos = ts.pos; game.targetVel = ts.vel }
           else game.setTarget(null)
         }
         game.update(dt)
         hud = game.readout()
         nodeInfo = game.nodeReadout()
+        // Render the universe on the SHIP's clock (st.t), not the wall clock — so the
+        // Moon (and everything) is drawn where its gravity actually is.
         if (view === 'map') {
           if (mapFollow && game.vesselId) mapCenter = { x: game.st.pos.x, y: game.st.pos.y }
-          drawMap(ctx, canvas.width, canvas.height, game, vessels, players, universeTime(), mapZoom, mapCenter)
-        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, universeTime())
+          drawMap(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t, mapZoom, mapCenter)
+        } else drawFlight(ctx, canvas.width, canvas.height, game, vessels, players, game.st.t)
       }
       raf = requestAnimationFrame(frame)
     }
